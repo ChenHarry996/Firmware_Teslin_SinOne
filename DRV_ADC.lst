@@ -1,0 +1,237 @@
+C51 COMPILER V9.54   DRV_ADC                                                               03/10/2021 14:40:16 PAGE 1   
+
+
+C51 COMPILER V9.54, COMPILATION OF MODULE DRV_ADC
+OBJECT MODULE PLACED IN DRV_ADC.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE c\DRV_ADC.c COMPACT OMF2 OPTIMIZE(8,SIZE) BROWSE DEFINE(XUART_LOG,XMOTOR
+                    -_PARAM_TEST,TIME2_ENABLE,XDC_INTERRUPT,VIB_TIME_ENABLE,FOUR_BUTTON,xLOWPOWER_DISABLEMOTOR) DEBUG PRINT(.\DRV_ADC.lst) TA
+                    -BS(2) OBJECT(DRV_ADC.obj)
+
+line level    source
+
+   1          /*******************************************************************
+   2          Copyright 
+   3          File name: DRV_ADC.c
+   4          Author:    Harry.Chen
+   5          ID: 
+   6          Version: 
+   7          Date: 
+   8          Description: 
+   9          Others: 
+  10          History: 
+  11              1.  Date:
+  12                Author: 
+  13                ID:
+  14                Modification:
+  15              2.  Date:
+  16                Author: 
+  17                ID:
+  18                Modification:
+  19          *******************************************************************/
+  20          
+  21          #include "H/Function_Init.H"
+  22          
+  23          void ADC_Init(UCHAR Channel);
+  24          
+  25          
+  26          
+  27          bit AdcFlag = 0;
+  28          
+  29          #define ADC_SAMPLE_COUNT 10
+  30          
+  31          
+  32          /**************************************************************************
+  33          * @function name:     Select ADC Port
+  34          * @Description:     
+  35          * @param:     
+  36          * @return:            NA
+  37          * @Author:      
+  38          * @Date:      
+  39          ***************************************************************************/
+  40          #if (IC_MODEL == SC92F7323)
+                enum Channel {AIN0=0,AIN1,AIN2,AIN3,AIN4,AIN5,AIN6,AIN7,AIN8,AIN9,VDD4=15};
+              #endif
+  43          
+  44          #if (IC_MODEL == SC92F7322)
+  45            enum Channel {AIN0=0,AIN1=1,AIN4=4,AIN5=5,AIN6,AIN7,AIN8,AIN9,VDD4=15};
+  46          #endif
+  47            
+  48          #if (IC_MODEL == SC92F7321)
+                enum Channel {AIN0=0,AIN1,AIN2,AIN3,AIN8=8,AIN9,VDD4=15};
+              #endif
+  51            
+  52          #if (IC_MODEL == SC92F7320)
+                enum Channel {AIN0=0,AIN1,AIN6=6,AIN7,VDD4=15};
+C51 COMPILER V9.54   DRV_ADC                                                               03/10/2021 14:40:16 PAGE 2   
+
+              #endif
+  55            
+  56          /**************************************************************************
+  57          * @function name:     ADC_Init
+  58          * @Description:       Switch ADC Channel
+  59          * @param:             Channel
+  60          * @return:            NA
+  61          * @Author:      
+  62          * @Date:      
+  63          ***************************************************************************/
+  64          void ADC_Init(UCHAR Channel)
+  65          {
+  66   1        /*Switch Reference Voltage*/
+  67   1      
+  68   1        if((Channel == ADC_BUTTON_CHANNEL) ||
+  69   1          (Channel == ADC_TEMPERATURE_CHANNEL))
+  70   1        {
+  71   2          OPINX  = 0XC2;  // ADC register.
+  72   2      
+  73   2          OPREG &=~ 0X80;  // Reference VDD
+  74   2          _nop_();
+  75   2          _nop_();
+  76   2        }
+  77   1        else if(Channel == ADC_BATTERY_CHANNEL)
+  78   1        {
+  79   2          OPINX  = 0XC2;  // ADC register.
+  80   2          OPREG |= 0X80;  // Reference 2.4V
+  81   2          _nop_();
+  82   2          _nop_();
+  83   2        }
+  84   1          
+  85   1        ADCCON = 0X80|Channel;    //Open ADC,sample frequency 2M, select the Channel ADC sampling port
+  86   1        if(Channel < 8)
+  87   1        {
+  88   2          ADCCFG0 = 1<<Channel;   //Set Channel as sample port
+  89   2        }
+  90   1        else
+  91   1        {
+  92   2          ADCCFG1 = 1<<(Channel-8);   //Set Channel as sample port
+  93   2        }
+  94   1      
+  95   1      
+  96   1        IE |= 0X40;        //Open ADC interrupt
+  97   1        EA = 1;
+  98   1        
+  99   1        return;
+ 100   1      }
+ 101          
+ 102          /**************************************************************************
+ 103          * @function name:     ADC_Interrupt
+ 104          * @Description:     
+ 105          * @param:     
+ 106          * @return:            NA
+ 107          * @Author:      
+ 108          * @Date:      
+ 109          ***************************************************************************/
+ 110          void ADC_Interrupt(void) interrupt 6
+ 111          {
+ 112   1        ADCCON &= ~(0X10);  //Clear interrupt bit
+ 113   1        AdcFlag = 1;
+ 114   1      }
+ 115          
+C51 COMPILER V9.54   DRV_ADC                                                               03/10/2021 14:40:16 PAGE 3   
+
+ 116          /**************************************************************************
+ 117          * @function name:     ADC_Sample
+ 118          * @Description:       
+ 119          * @param:             Channel
+ 120          * @return:            ADC Sample Value
+ 121          * @Author:      
+ 122          * @Date:      
+ 123          ***************************************************************************/
+ 124          USHORT ADC_Sample(UCHAR Channel)
+ 125          {
+ 126   1        UCHAR   ucLoop = 0;
+ 127   1        UINT    uiAdcValue = 0;
+ 128   1        USHORT  usMinAd = 0x0fff;
+ 129   1        USHORT  usMaxAd = 0x0000;
+ 130   1        USHORT  ADCValue = 0;
+ 131   1        
+ 132   1        ADC_Init(Channel);
+ 133   1        
+ 134   1        for (ucLoop = 0; ucLoop < ADC_SAMPLE_COUNT; ucLoop++) 
+ 135   1        {
+ 136   2          
+ 137   2          ADCCON |= 0X40;             //Start ADC Sample
+ 138   2          while(!AdcFlag);               //Wait sample complete
+ 139   2          AdcFlag = 0;
+ 140   2          ADCValue = ((UINT)ADCVH<<4)+(ADCVL>>4);
+ 141   2      
+ 142   2          if(ADCValue > usMaxAd)
+ 143   2          {
+ 144   3            usMaxAd = ADCValue;
+ 145   3          }
+ 146   2          if(ADCValue < usMinAd)
+ 147   2          {
+ 148   3            usMinAd = ADCValue;
+ 149   3          }
+ 150   2          uiAdcValue += ADCValue;   //Sum sample value
+ 151   2        }
+ 152   1      
+ 153   1          uiAdcValue -= usMinAd;
+ 154   1          uiAdcValue -= usMaxAd;
+ 155   1          uiAdcValue >>= 3;   //Average
+ 156   1      
+ 157   1          
+ 158   1        //AdcFlag = 0;
+ 159   1      
+ 160   1        return ((USHORT)uiAdcValue);
+ 161   1      }
+ 162          /**************************************************************************
+ 163          * @function name:     HAL_ADCPhysicalVoltage
+ 164          * @Description:     Sample and calculate the ADC Physical value
+ 165                                Reference voltage is  fixed 2.4v, if use this port need 
+ 166                                consider add parameter
+ 167          * @param:             ADC_chanel
+ 168          * @return:            Physical voltage
+ 169          * @Author:      
+ 170          * @Date:      
+ 171          ***************************************************************************/
+ 172          
+ 173          USHORT ADCPhysicalVoltage(UCHAR ADC_chanel)
+ 174          {
+ 175   1      //    UCHAR  ucAdcTestValue[1]={0};
+ 176   1          ULONG  ulAdcSampleValue = 0;
+ 177   1          USHORT usADCPhysicalVoltage = 0;
+C51 COMPILER V9.54   DRV_ADC                                                               03/10/2021 14:40:16 PAGE 4   
+
+ 178   1      
+ 179   1          ulAdcSampleValue = ADC_Sample(ADC_chanel);
+ 180   1        usADCPhysicalVoltage =((ulAdcSampleValue*1000)/4096)*2400/1000; // Voltage MV, Reference 2.4V
+ 181   1      
+ 182   1      //    ucAdcTestValue[1] = usADCPhysicalVoltage&0xff;
+ 183   1      //    ucAdcTestValue[0] = (usADCPhysicalVoltage>>8)&0xff;     
+ 184   1      //    ADCUartSendString(ucAdcTestValue);
+ 185   1      
+ 186   1         return usADCPhysicalVoltage;
+ 187   1      }
+ 188          
+ 189          /**************************************************************************
+ 190          * @function name:     ADC_Stop
+ 191          * @Description:       Close ADC function to enter into Low Power
+ 192          * @param:
+ 193          * @return:            NA
+ 194          * @Author:
+ 195          * @Date:
+ 196          ***************************************************************************/
+ 197          void ADC_Stop(void)
+ 198          {
+ 199   1        ADCCON &=~ 0x80;
+ 200   1      
+ 201   1        return;
+ 202   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    322    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----      10
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      1    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

@@ -1,0 +1,502 @@
+C51 COMPILER V9.54   DRV_GPIO                                                              03/10/2021 14:40:16 PAGE 1   
+
+
+C51 COMPILER V9.54, COMPILATION OF MODULE DRV_GPIO
+OBJECT MODULE PLACED IN DRV_GPIO.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE c\DRV_GPIO.c COMPACT OMF2 OPTIMIZE(8,SIZE) BROWSE DEFINE(XUART_LOG,XMOTO
+                    -R_PARAM_TEST,TIME2_ENABLE,XDC_INTERRUPT,VIB_TIME_ENABLE,FOUR_BUTTON,xLOWPOWER_DISABLEMOTOR) DEBUG PRINT(.\DRV_GPIO.lst) 
+                    -TABS(2) OBJECT(DRV_GPIO.obj)
+
+line level    source
+
+   1          /*******************************************************************
+   2          Copyright 
+   3          File name: DRV_GPIO.c
+   4          Author:    Harry.Chen
+   5          ID: 
+   6          Version: 
+   7          Date: 
+   8          Description: 
+   9          Others: 
+  10          History: 
+  11              1.  Date:
+  12                Author: 
+  13                ID:
+  14                Modification:
+  15              2.  Date:
+  16                Author: 
+  17                ID:
+  18                Modification:
+  19          *******************************************************************/
+  20          
+  21          #include "H/Function_Init.H"
+  22          
+  23          
+  24          //STATIC LED_MODE_E enCurrtLEDValue = POWER_BUTTON_PRESS;
+  25          //STATIC UCHAR ucLEDFlashCount = 0;
+  26          STATIC BOOL boLEDFlashEnable = FALSE;
+  27          STATIC BOOL boLEDBlinkEnable = FALSE;
+  28          STATIC BOOL boLongPressedLEDBlinkEnable = FALSE;
+  29          
+  30          void UpDownPressedLedBlink(void);
+  31          void MinusButtonLongPressedLedBlink(void);
+  32          void BothPressedLedBlink(void);
+  33          /**************************************************************************
+  34          * @function name:     IO_Init
+  35          * @Description:       Config the IO register
+  36          * @param:     
+  37          * @return:            NA          
+  38          * @Author:      
+  39          * @Date:      
+  40          ***************************************************************************/
+  41          void IO_Init(void)
+  42          {
+  43   1        #if (IC_MODEL == SC92F7323)  //SC92F7323 GPIO define
+                P0CON = 0x00;  //Set P0 to high resistance,pull up mode
+                P0PH  = 0xFF;
+                P1CON = 0x00;  //Set P1 to high resistance,input mode
+                P1PH  = 0x00;
+                P2CON = 0xFF;  //Set P2 to strong push-pull mode
+                P2PH  = 0x00;
+                P5CON = 0xFF;  //Set P5 to strong push-pull mode
+                P5PH  = 0x00;
+                #endif
+  53   1        
+C51 COMPILER V9.54   DRV_GPIO                                                              03/10/2021 14:40:16 PAGE 2   
+
+  54   1        #if (IC_MODEL == SC92F7322)  //SC92F7323 GPIO define
+  55   1        /*Following the PCBA revision C*/
+  56   1        P0CON = 0x3B; 
+  57   1        P0PH  = 0x3B;
+  58   1        //P1CON = 0xC8;  
+  59   1        P1CON = 0x88; 
+  60   1        P1PH  = 0xCF;
+  61   1        P2CON = 0xC0;  
+  62   1        P2PH  = 0xC0;
+  63   1        SC92F7322_NIO_Init(); //NO initial IO port configuration 
+  64   1        #endif  
+  65   1        
+  66   1        #if (IC_MODEL == SC92F7321)  //SC92F7321 GPIO define
+                P0CON = 0x00;  //Set P0 to high resistance,pull up mode
+                P0PH  = 0xFF;
+                P1CON = 0x00;  //Set P1 to high resistance,input mode
+                P1PH  = 0x00;
+                P2CON = 0xFD;  //Set P2 to strong push-pull mode
+                P2PH  = 0x00;
+                SC92F7321_NIO_Init(); //NO initial IO port configuration 
+                #endif
+  75   1        
+  76   1        #if (IC_MODEL == SC92F7320)  //SC92F7320 GPIO define
+                P1CON = 0x00;  //Set P1 to high resistance,input mode
+                P1PH  = 0x00;
+                P2CON = 0xFF;  //Set P2 to strong push-pull mode
+                P2PH  = 0x00;
+                SC92F7320_NIO_Init(); //NO initial IO port configuration 
+                #endif
+  83   1      }
+  84          /**************************************************************************
+  85          * @function name:     GPIO_Init
+  86          * @Description:       Initial GPIO state
+  87          * @param:     
+  88          * @return:            NA
+  89          * @Author:      
+  90          * @Date:      
+  91          ***************************************************************************/
+  92          void GPIO_Init(void)
+  93          {
+  94   1        IO_Init();
+  95   1        LEDOff();
+  96   1        ADBatteryPowerSupplyDisable();
+  97   1        ChargeFunctionEnable();
+  98   1        TouchFunctionDisable();
+  99   1        return;
+ 100   1      }
+ 101          
+ 102          /**************************************************************************
+ 103          * @function name:     LEDON
+ 104          * @Description:       Mode LED
+ 105          * @param:     
+ 106          * @return:            NA
+ 107          * @Author:      
+ 108          * @Date:      
+ 109          ***************************************************************************/
+ 110          void LEDON(void)
+ 111          {
+ 112   1        GPIO_OUTPUT_LOW(LED_EN);
+ 113   1        
+ 114   1        return;
+ 115   1      }
+C51 COMPILER V9.54   DRV_GPIO                                                              03/10/2021 14:40:16 PAGE 3   
+
+ 116          
+ 117          /**************************************************************************
+ 118          * @function name:     LEDOff
+ 119          * @Description:       Mode LED
+ 120          * @param:   
+ 121          * @return:            NA
+ 122          * @Author:      
+ 123          * @Date:      
+ 124          ***************************************************************************/
+ 125          void LEDOff(void)
+ 126          {
+ 127   1        GPIO_OUTPUT_HIGH(LED_EN);
+ 128   1        
+ 129   1        //GPIO_OUTPUT_HIGH(LED_POWER_RIGHT);
+ 130   1        GPIO_OUTPUT_HIGH(LED_POWER_LEFT);
+ 131   1        GPIO_OUTPUT_HIGH(LED_POWER_UP);
+ 132   1        
+ 133   1        return;
+ 134   1      }
+ 135          /**************************************************************************
+ 136          * @function name:     LEDFlash
+ 137          * @Description:       
+ 138          * @param:     
+ 139          * @return:            NA
+ 140          * @Author:      
+ 141          * @Date:      
+ 142          ***************************************************************************/
+ 143          void LEDFlash(void)
+ 144          {
+ 145   1          GPIO_OUTPUT_TOGGLE(LED_EN);
+ 146   1        
+ 147   1        return;
+ 148   1      }
+ 149          
+ 150          /**************************************************************************
+ 151          * @function name:     LEDCurrentState
+ 152          * @Description:       Choose Different LED state
+ 153          * @param:     
+ 154          * @return:            NA
+ 155          * @Author:      
+ 156          * @Date:      
+ 157          ***************************************************************************/
+ 158          void LEDCurrentState(LED_MODE_E ucLedMode)
+ 159          {
+ 160   1        switch(ucLedMode)
+ 161   1        {
+ 162   2          case POWER_BUTTON_PRESS:
+ 163   2      
+ 164   2              break;
+ 165   2          case PLUS_BUTTON_PRESS:
+ 166   2      
+ 167   2              UpDownPressedLedBlink();
+ 168   2              break;
+ 169   2          case MINUS_BUTTON_PRESS:
+ 170   2      
+ 171   2              UpDownPressedLedBlink();
+ 172   2              break;
+ 173   2          case BOTH_BUTTON_PRESS:
+ 174   2      
+ 175   2            BothPressedLedBlink();
+ 176   2              break;
+ 177   2          case MINUS_BUTTON_LONG_PRESS:
+C51 COMPILER V9.54   DRV_GPIO                                                              03/10/2021 14:40:16 PAGE 4   
+
+ 178   2      
+ 179   2            MinusButtonLongPressedLedBlink();
+ 180   2              break;    
+ 181   2          case LED_FLASH:
+ 182   2            
+ 183   2               LEDFlash();
+ 184   2              break;
+ 185   2          case LED_ON:
+ 186   2            
+ 187   2              LEDON();
+ 188   2              break;    
+ 189   2          case LED_OFF:
+ 190   2      
+ 191   2              LEDOff();
+ 192   2              break;
+ 193   2          
+ 194   2          default:
+ 195   2            
+ 196   2              break;
+ 197   2        }
+ 198   1        return;
+ 199   1      }
+ 200          
+ 201          
+ 202          /**************************************************************************
+ 203          * @function name:     UpDownPressedLedBlink
+ 204          * @Description:       Plus or Minus button Pressed,need LED toggle
+ 205          * @param:   
+ 206          * @return:            NA
+ 207          * @Author:      
+ 208          * @Date:      
+ 209          ***************************************************************************/
+ 210          void UpDownPressedLedBlink(void)  
+ 211          {
+ 212   1        if(boLEDFlashEnable == TRUE)
+ 213   1        {
+ 214   2          return;
+ 215   2        }
+ 216   1        LEDFlash();
+ 217   1        Delay_ms(100);
+ 218   1        LEDFlash();
+ 219   1        boLEDFlashEnable = TRUE;
+ 220   1        return;
+ 221   1      }
+ 222          /**************************************************************************
+ 223          * @function name:     BothPressedLedBlink
+ 224          * @Description:       Plus and Minus button pressed together
+ 225          * @param:     
+ 226          * @return:            NA
+ 227          * @Author:      
+ 228          * @Date:      
+ 229          ***************************************************************************/
+ 230          void BothPressedLedBlink(void)
+ 231          {
+ 232   1        UCHAR ucLoop = 0;
+ 233   1        if(boLEDBlinkEnable)
+ 234   1        {
+ 235   2          return;
+ 236   2        }
+ 237   1        for(;ucLoop<=2;ucLoop++)
+ 238   1        {
+ 239   2          LEDFlash();
+C51 COMPILER V9.54   DRV_GPIO                                                              03/10/2021 14:40:16 PAGE 5   
+
+ 240   2          Delay_ms(100);
+ 241   2        } 
+ 242   1        LEDFlash();
+ 243   1        boLEDBlinkEnable = TRUE;  
+ 244   1        
+ 245   1        return;
+ 246   1      }
+ 247          /**************************************************************************
+ 248          * @function name:     MinusButtonLongPressedLedBlink
+ 249          * @Description:     Minus Button Long Pressed
+ 250          * @param:
+ 251          * @return:            NA
+ 252          * @Author:
+ 253          * @Date:
+ 254          ***************************************************************************/
+ 255          void MinusButtonLongPressedLedBlink(void)
+ 256          {
+ 257   1        if (boLongPressedLEDBlinkEnable == TRUE)
+ 258   1        {
+ 259   2          return;
+ 260   2        }
+ 261   1        LEDFlash();
+ 262   1        Delay_ms(100);
+ 263   1        LEDFlash();
+ 264   1        boLongPressedLEDBlinkEnable = TRUE;
+ 265   1        return;
+ 266   1      }
+ 267          /**************************************************************************
+ 268          * @function name:     LedBlinkParamemterClear
+ 269          * @Description:       Clear Paramemter
+ 270          * @param:     
+ 271          * @return:            NA
+ 272          * @Author:      
+ 273          * @Date:      
+ 274          ***************************************************************************/
+ 275          void LedBlinkParamemterClear(void)
+ 276          {
+ 277   1        boLEDFlashEnable = FALSE;
+ 278   1        boLEDBlinkEnable = FALSE;
+ 279   1        boLongPressedLEDBlinkEnable = FALSE;
+ 280   1        //TimerUartSendString("3\r\n");
+ 281   1        return;
+ 282   1      }
+ 283          /**************************************************************************
+ 284          * @function name:     IsChargeDCInput
+ 285          * @Description:       
+ 286          * @param:     
+ 287          * @return:      
+ 288                    FALSE:  Charge
+ 289                    TRUE:   DisCharge
+ 290          * @Author:      
+ 291          * @Date:      
+ 292          ***************************************************************************/
+ 293          BOOL IsChargeDCInput(void)
+ 294          {
+ 295   1        
+ 296   1        if(CHARGE_POWER_ACTIVE == CHARGE_DC_INPUT)
+ 297   1        {
+ 298   2          return TRUE;
+ 299   2        }
+ 300   1      
+ 301   1        return FALSE;
+C51 COMPILER V9.54   DRV_GPIO                                                              03/10/2021 14:40:16 PAGE 6   
+
+ 302   1      }
+ 303          
+ 304          /**************************************************************************
+ 305          * @function name:     ChargeFunctionEnable
+ 306          * @Description:       Enable Charge IC Work
+ 307          * @param:     
+ 308          * @return:            NA
+ 309          * @Author:      
+ 310          * @Date:      
+ 311          ***************************************************************************/
+ 312          void ChargeFunctionEnable(void)
+ 313          {
+ 314   1        GPIO_OUTPUT_LOW(CHARGE_EN);
+ 315   1        
+ 316   1        return;
+ 317   1      }
+ 318          
+ 319          /**************************************************************************
+ 320          * @function name:     ChargeFunctionDisable
+ 321          * @Description:       Disable Charge IC
+ 322          * @param:     
+ 323          * @return:            NA
+ 324          * @Author:      
+ 325          * @Date:      
+ 326          ***************************************************************************/
+ 327          void ChargeFunctionDisable(void)
+ 328          {
+ 329   1        GPIO_OUTPUT_HIGH(CHARGE_EN);
+ 330   1        
+ 331   1        return;
+ 332   1      }
+ 333          /**************************************************************************
+ 334          * @function name:     IsChargeState
+ 335          * @Description:       
+ 336          * @param:     
+ 337          * @return:      
+ 338                    FALSE:  Charging
+ 339                    TRUE:   FullCharge
+ 340          * @Author:      
+ 341          * @Date:      
+ 342          ***************************************************************************/
+ 343          BOOL IsChargeComplete(void)
+ 344          {
+ 345   1        if(BATTERY_CHARGE_COMPLETE == CHARGE_STATE)
+ 346   1        {
+ 347   2          return TRUE;
+ 348   2        }
+ 349   1      
+ 350   1        return FALSE;
+ 351   1      }
+ 352          /**************************************************************************
+ 353          * @function name:     IsTouchState
+ 354          * @Description:     
+ 355          * @param:     
+ 356          * @return:      
+ 357                    FALSE:  No Touch
+ 358                    TRUE:   Touch
+ 359          * @Author:      
+ 360          * @Date:      
+ 361          ***************************************************************************/
+ 362          BOOL IsTouchState(void)
+ 363          { 
+C51 COMPILER V9.54   DRV_GPIO                                                              03/10/2021 14:40:16 PAGE 7   
+
+ 364   1        if(TOUCH_SENSOR_ACTIVE == TOUCH_STATE_INPUT)
+ 365   1        {
+ 366   2          return TRUE;
+ 367   2        }
+ 368   1      
+ 369   1        return FALSE;
+ 370   1      }
+ 371          
+ 372          /**************************************************************************
+ 373          * @function name:     TouchFunctionEnable
+ 374          * @Description:       Enable Touch Function 
+ 375          * @param:     
+ 376          * @return:            NA
+ 377          * @Author:      
+ 378          * @Date:      
+ 379          ***************************************************************************/
+ 380          void TouchFunctionEnable(void)
+ 381          {
+ 382   1        GPIO_OUTPUT_HIGH(TOUCH_EN);
+ 383   1        
+ 384   1        return;
+ 385   1      }
+ 386          
+ 387          /**************************************************************************
+ 388          * @function name:     TouchFunctionDisable
+ 389          * @Description:       Disable Touch Function
+ 390          * @param:     
+ 391          * @return:            NA
+ 392          * @Author:      
+ 393          * @Date:      
+ 394          ***************************************************************************/
+ 395          void TouchFunctionDisable(void)
+ 396          {
+ 397   1        GPIO_OUTPUT_LOW(TOUCH_EN);
+ 398   1        
+ 399   1        return;
+ 400   1      }
+ 401          
+ 402          /**************************************************************************
+ 403          * @function name:     TouchFunctionSwitch
+ 404          * @Description:       Switch function
+ 405          * @param:     
+ 406          * @return:            NA
+ 407          * @Author:      
+ 408          * @Date:      
+ 409          ***************************************************************************/
+ 410          void TouchFunctionSwitch(void)
+ 411          {
+ 412   1        if(TRUE == TOUCH_EN)
+ 413   1        {
+ 414   2          TouchFunctionDisable();
+ 415   2          GPIOUartSendString("TouchFunctionDisable\r\n");
+ 416   2        }
+ 417   1        else
+ 418   1        {
+ 419   2          TouchFunctionEnable();
+ 420   2          GPIOUartSendString("TouchFunctionEnable\r\n");
+ 421   2        }
+ 422   1        return;
+ 423   1      }
+ 424          /**************************************************************************
+ 425          * @function name:     ADBatteryPowerSupplyEnable
+C51 COMPILER V9.54   DRV_GPIO                                                              03/10/2021 14:40:16 PAGE 8   
+
+ 426          * @Description:       Power the AD sample ciruit, Set the GPIO as Input Pin
+ 427          * @param:     
+ 428          * @return:            NA
+ 429          * @Author:      
+ 430          * @Date:      
+ 431          ***************************************************************************/
+ 432          void ADBatteryPowerSupplyEnable(void)
+ 433          {
+ 434   1        P2CON |= 0xC0;
+ 435   1        P2PH  |= 0xC0;
+ 436   1        
+ 437   1        GPIO_OUTPUT_LOW(ADC_EN);
+ 438   1        
+ 439   1        return;
+ 440   1      }
+ 441          
+ 442          /**************************************************************************
+ 443          * @function name:     ADBatteryPowerSupplyDisable
+ 444          * @Description:       Stop the AD sample ciruit,Set the GPIO as High resistance
+ 445          * @param:     
+ 446          * @return:            NA
+ 447          * @Author:      
+ 448          * @Date:      
+ 449          ***************************************************************************/
+ 450          void ADBatteryPowerSupplyDisable(void)
+ 451          { 
+ 452   1        
+ 453   1        /*switch to High in*/
+ 454   1        P2CON &= 0x80;
+ 455   1        P2PH  &= 0x80;
+ 456   1        
+ 457   1        //GPIO_OUTPUT_HIGH(ADC_EN);
+ 458   1        return;
+ 459   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    275    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =      3       1
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

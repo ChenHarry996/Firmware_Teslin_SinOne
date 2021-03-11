@@ -1,0 +1,315 @@
+C51 COMPILER V9.54   DRV_UART                                                              03/10/2021 14:40:17 PAGE 1   
+
+
+C51 COMPILER V9.54, COMPILATION OF MODULE DRV_UART
+OBJECT MODULE PLACED IN DRV_Uart.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE c\DRV_Uart.c COMPACT OMF2 OPTIMIZE(8,SIZE) BROWSE DEFINE(XUART_LOG,XMOTO
+                    -R_PARAM_TEST,TIME2_ENABLE,XDC_INTERRUPT,VIB_TIME_ENABLE,FOUR_BUTTON,xLOWPOWER_DISABLEMOTOR) DEBUG PRINT(.\DRV_Uart.lst) 
+                    -TABS(2) OBJECT(DRV_Uart.obj)
+
+line level    source
+
+   1          /*******************************************************************
+   2          Copyright 
+   3          File name: DRV_Uart.c
+   4          Author:    Harry.Chen
+   5          ID: 
+   6          Version: 
+   7          Date: 
+   8          Description: 
+   9          Others: 
+  10          History: 
+  11              1.  Date:
+  12                Author: 
+  13                ID:
+  14                Modification:
+  15              2.  Date:
+  16                Author: 
+  17                ID:
+  18                Modification:
+  19          *******************************************************************/
+  20          
+  21          #include "H/Function_Init.H" 
+  22          
+  23          bit UartSendFlag = 0;     //Send interrupt flag bits
+  24          bit UartReceiveFlag = 0; //Receive interrupt flag bits
+  25          #ifdef UART_LOG
+              UCHAR ucReceiveData[RECEIVE_DATA_LENGTH] = {0};
+              UCHAR ucReceiveDatalength = 0;
+              #endif
+  29          //BOOL boIsReceiveComplete = FALSE;
+  30          
+  31          
+  32          /**************************************************************************
+  33          * @function name:     Uart0_Init
+  34          * @Description:       Uart Initialize
+  35          * @param:     
+  36          * @return:            NA  
+  37          * @Author:      
+  38          * @Date:      
+  39          ***************************************************************************/
+  40          void Uart0_Init(void)    //Select Timer1 as the baud rate signal generator
+  41          {
+  42   1      #ifdef UART_LOG
+                TX_PORT = 1;     //TX initial high level£»
+                SCON = 0X50;     //Mode 1, allowing data to be received
+                PCON |= 0X80; 
+                T2CON = 0x00; //Use timer 1 as the UART clock
+                TMOD |= 0X20;     //Timer 1, 8-bit automatic reload
+                TMCON |= 0X02;    //Timer1   Fsys£»
+                TL1 = 217;    
+                TH1 = 217;     //UART Band rate 12M condition is 19200£»
+                TR1 = 1;     //Open Timer1
+                EUART = 1;       //Enable UART interrupt
+                EA = 1;        //SETB EA
+C51 COMPILER V9.54   DRV_UART                                                              03/10/2021 14:40:17 PAGE 2   
+
+              #endif
+  55   1      }
+  56          
+  57          /*
+  58          void Uart0_Init(void)    //Select Timer2 as the baud rate signal generator
+  59          {
+  60            P1CON &= 0XF3;
+  61            P1PH |= 0X0C;  //Tx is the strong push output, Rx is the band pull input;
+  62            SCON  = 0X50;    //Set the communication mode to mode 1 to allow receiving
+  63            PCON |= 0X80; 
+  64            TMCON |= 0X04;
+  65            T2MOD = 0X00;
+  66            T2CON = 0X30;
+  67            RCAP2H = 0xFF;
+  68            RCAP2L = 0xB2;
+  69            TR2 = 1;
+  70            EUART = 1;     //Enable Uart0 interrupt
+  71            EA = 1;
+  72          }
+  73          */
+  74          
+  75          /**************************************************************************
+  76          * @function name:     UartInt
+  77          * @Description:       Uart Interrupt
+  78          * @param:     
+  79          * @return:            NA
+  80          * @Author:      
+  81          * @Date:      
+  82          ***************************************************************************/
+  83          void UartInt(void) interrupt 4
+  84          {
+  85   1      #ifdef UART_LOG
+                if(TI)
+                {
+                  TI = 0; 
+                  UartSendFlag = 1;   
+                }
+                if(RI)
+                {
+                  RI = 0; 
+                  ucReceiveData[ucReceiveDatalength++] = SBUF;
+                  if(ucReceiveDatalength == sizeof(ucReceiveData))
+                  {
+                    UartReceiveFlag = 1;
+                    ucReceiveDatalength = 0;
+                  }
+                } 
+              #endif
+ 102   1      }
+ 103          
+ 104          /**************************************************************************
+ 105          * @function name:     TimerUartSendString
+ 106          * @Description:     
+ 107          * @param:     
+ 108          * @return:            NA
+ 109          * @Author:      
+ 110          * @Date:      
+ 111          ***************************************************************************/
+ 112          void TimerUartSendString(UCHAR *pucTxString)
+ 113          {
+ 114   1          UCHAR *pucTemp = pucTxString;
+ 115   1        
+C51 COMPILER V9.54   DRV_UART                                                              03/10/2021 14:40:17 PAGE 3   
+
+ 116   1          if (NULL == pucTemp)
+ 117   1          {
+ 118   2              return;
+ 119   2          }
+ 120   1          
+ 121   1          while (*pucTemp != '\0')
+ 122   1          {
+ 123   2              
+ 124   2              SBUF=*pucTemp;
+ 125   2              while(!UartSendFlag);
+ 126   2              UartSendFlag = 0;
+ 127   2              pucTemp++;
+ 128   2          }
+ 129   1          return;
+ 130   1      }
+ 131          
+ 132          /**************************************************************************
+ 133          * @function name:     TimerUartSendByte
+ 134          * @Description:     
+ 135          * @param:     
+ 136          * @return:            NA
+ 137          * @Author:      
+ 138          * @Date:      
+ 139          ***************************************************************************/
+ 140          void TimerUartSendByte(UCHAR ucParameter)
+ 141          {
+ 142   1        if(ucParameter=='\n')
+ 143   1        {
+ 144   2      
+ 145   2          SBUF=0xFF; 
+ 146   2          while(!UartSendFlag);
+ 147   2          UartSendFlag=0;     
+ 148   2        }
+ 149   1        else
+ 150   1        {
+ 151   2          SBUF=ucParameter;
+ 152   2          while(!UartSendFlag);
+ 153   2          UartSendFlag=0;
+ 154   2        }
+ 155   1      return;
+ 156   1      }
+ 157          /**************************************************************************
+ 158          * @function name:     TimerUartReceiveByte
+ 159          * @Description:     
+ 160          * @param:     
+ 161          * @return:            NA
+ 162          * @Author:      
+ 163          * @Date:      
+ 164          ***************************************************************************/
+ 165          
+ 166          UCHAR *TimerUartReceive()
+ 167          {
+ 168   1      #ifdef UART_LOG 
+                if(UartReceiveFlag)
+                {
+                  TimerUartSendString(ucReceiveData);
+                  UartReceiveFlag = 0;
+                  return ucReceiveData;
+                }
+              #endif  
+ 176   1        return NULL;
+ 177   1      }
+C51 COMPILER V9.54   DRV_UART                                                              03/10/2021 14:40:17 PAGE 4   
+
+ 178          /**************************************************************************
+ 179          * @function name:     DebugPrintf
+ 180          * @Description:     
+ 181          * @param:     
+ 182          * @return:            NA
+ 183          * @Author:      
+ 184          * @Date:      
+ 185          ***************************************************************************/
+ 186          #if 0
+              void DebugPrintf(CHAR *format, ...)
+              {
+                  CHAR acLogBuf[LOG_LINE_LEN] = {0};
+                  va_list args;
+              
+                  va_start (args, format);
+                  vsprintf(acLogBuf, format, args);
+                  va_end (args);
+              
+                  TimerUartSendString(acLogBuf);
+              
+                  return;
+              }
+              #endif
+ 201          /**************************************************************************
+ 202          * @function name:     UARTRxDataClear
+ 203          * @Description:       Claear UART RX Data
+ 204          * @param:     
+ 205          * @return:            NA
+ 206          * @Author:      
+ 207          * @Date:      
+ 208          ***************************************************************************/
+ 209          void UARTRxDataClear(void)
+ 210          {
+ 211   1      #ifdef UART_LOG 
+                UCHAR ucLoop = 0;
+                
+                for(ucLoop=0;ucLoop<sizeof(ucReceiveData);ucLoop++)
+                {
+                  ucReceiveData[ucLoop] = 0;
+                }
+              #endif
+ 219   1        return;
+ 220   1      }
+ 221          
+ 222          /**************************************************************************
+ 223          * @function name:     UART_Stop
+ 224          * @Description:       Stop Uart Port
+ 225          * @param:     
+ 226          * @return:            NA
+ 227          * @Author:      
+ 228          * @Date:      
+ 229          ***************************************************************************/
+ 230          void UART_Stop(void)
+ 231          {
+ 232   1        TR1 = 0;
+ 233   1        EUART = 0;
+ 234   1        
+ 235   1        return;
+ 236   1      }
+ 237          
+ 238          /**************************************************************************
+ 239          * @function name:     MotorParamTest
+C51 COMPILER V9.54   DRV_UART                                                              03/10/2021 14:40:17 PAGE 5   
+
+ 240          * @Description:       Motore DutyCycle set from uart TX
+ 241          * @param:     
+ 242          * @return:            NA
+ 243          * @Author:      
+ 244          * @Date:      
+ 245          ***************************************************************************/
+ 246          #ifdef MOTOR_PARAM_TEST
+              void MotorParamTest(void)
+              {
+                STATIC UCHAR *pReceiveData;
+                STATIC USHORT usVIBDutyCycleRX = 0;
+                STATIC UCHAR ucVIBDutyCycleRXHigh = 0;
+                STATIC UCHAR ucVIBDutyCycleRXLow = 0;
+                
+                    pReceiveData = TimerUartReceive();
+                  if(*pReceiveData == 0x01)  //Make a sample verify
+                  {
+                    ucVIBDutyCycleRXHigh = (*(pReceiveData+1));
+                    ucVIBDutyCycleRXLow  = (*(pReceiveData+2));
+                    if((ucVIBDutyCycleRXLow == 0) && (ucVIBDutyCycleRXHigh == 0))
+                    {
+                      ucVIBDutyCycleRXLow = 1;
+                    }
+                      
+                    usVIBDutyCycleRX = (3000/((USHORT)(ucVIBDutyCycleRXHigh << 8) + ucVIBDutyCycleRXLow ))-1;
+                    
+                    if(usVIBDutyCycleRX >= 255)
+                    {
+                      usVIBDutyCycleRX = 255;
+                    }
+                    PWMPRD = usVIBDutyCycleRX;
+                    
+                    VIBMotorDutySet(*(pReceiveData+3));
+                    PATMotorDutySet(*(pReceiveData+4));
+                          
+                    UARTRxDataClear();
+                  }
+              }
+              #endif
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =     65    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      2    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

@@ -1,0 +1,499 @@
+C51 COMPILER V9.54   HAL_BATTERY                                                           03/10/2021 14:40:16 PAGE 1   
+
+
+C51 COMPILER V9.54, COMPILATION OF MODULE HAL_BATTERY
+OBJECT MODULE PLACED IN HAL_Battery.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE HAL\HAL_Battery.c COMPACT OMF2 OPTIMIZE(8,SIZE) BROWSE DEFINE(XUART_LOG,
+                    -XMOTOR_PARAM_TEST,TIME2_ENABLE,XDC_INTERRUPT,VIB_TIME_ENABLE,FOUR_BUTTON,xLOWPOWER_DISABLEMOTOR) DEBUG PRINT(.\HAL_Batte
+                    -ry.lst) TABS(2) OBJECT(HAL_Battery.obj)
+
+line level    source
+
+   1          /*******************************************************************
+   2          Copyright 
+   3          File name: HAL_Battery.c
+   4          Author:    Harry.Chen
+   5          ID: 
+   6          Version: 
+   7          Date: 
+   8          Description: 
+   9          Others: 
+  10          History: 
+  11              1.  Date:
+  12                Author: 
+  13                ID:
+  14                Modification:
+  15              2.  Date:
+  16                Author: 
+  17                ID:
+  18                Modification:
+  19          *******************************************************************/
+  20          #include "H/Function_Init.H"
+  21          
+  22          
+  23          STATIC USHORT usBatterySampleTimerCount = 0;
+  24          STATIC UCHAR ucDeviceAutoOff_TenSec = 0;
+  25          STATIC UCHAR ucBatteryTemperatureOverCount = 0;
+  26          STATIC UCHAR ucBatteryTemperatureOverPeriod = 0;
+  27          STATIC BOOL boBatteryTemperatureOver = FALSE;
+  28          STATIC UCHAR ucBatteryLess_3400MV = 0;
+  29          #ifdef LOWPOWER_DISABLEMOTOR
+              STATIC BOOL boBatteryCapacityLow = FALSE;
+              STATIC UCHAR ucBatteryLess_3200MV = 0;
+              #endif
+  33          STATIC BOOL boBatteryLowIndicate = FALSE;
+  34          
+  35          UCHAR ucBatterySampleFiterCount = 0;
+  36          STATIC USHORT usBatterySampleFiterValue[BATTERY_SAMPLE_DATA_LEN]={0};
+  37          
+  38          void BatterySampleTimerCountClear(void);
+  39          void TemperatureWarning(void);
+  40          /**************************************************************************
+  41          * @function name:     HAL_BatteryADCPhysicalVoltage
+  42          * @Description:       Get the battery physical value
+  43          * @param:     
+  44          * @return:            Battery Value
+  45          * @Author:      
+  46          * @Date:      
+  47          ***************************************************************************/
+  48          USHORT HAL_BatteryADCPhysicalVoltage(void)
+  49          {
+  50   1        USHORT usBatteryPhysicalValue = 0;
+  51   1      //  UCHAR  ucAdcTestValue[2]={0};
+  52   1        
+  53   1        usBatteryPhysicalValue=2*ADCPhysicalVoltage(ADC_BATTERY_CHANNEL); // The partial voltage resistance is th
+C51 COMPILER V9.54   HAL_BATTERY                                                           03/10/2021 14:40:16 PAGE 2   
+
+             -e same
+  54   1         
+  55   1      //  ucAdcTestValue[2] = usBatteryPhysicalValue&0xff;
+  56   1      //  ucAdcTestValue[1] = (usBatteryPhysicalValue>>8)&0xff;   
+  57   1      //  ucAdcTestValue[0] = 0xee;
+  58   1      //  BatteryUartSendValue(ucAdcTestValue);
+  59   1         
+  60   1        return usBatteryPhysicalValue;
+  61   1      }
+  62          
+  63          /**************************************************************************
+  64          * @function name:     BatterySampleFiter
+  65          * @Description:       Make the Battery value stable
+  66          * @param:     
+  67          * @return:      NA
+  68          * @Author:      
+  69          * @Date:      
+  70          ***************************************************************************/
+  71          USHORT BatterySampleFiter(void)
+  72          {
+  73   1        UCHAR ucLoop = 0;
+  74   1        ULONG ulBatteryValue = 0;
+  75   1      //  UCHAR  ucAdcTestValue[2]={0};
+  76   1        
+  77   1        for(ucLoop = 0; ucLoop < BATTERY_SAMPLE_DATA_LEN; ucLoop++)
+  78   1        {
+  79   2          if(usBatterySampleFiterValue[ucLoop] == 0)
+  80   2          {
+  81   3            usBatterySampleFiterValue[ucLoop] = HAL_BatteryADCPhysicalVoltage();    
+  82   3          }
+  83   2        }
+  84   1        usBatterySampleFiterValue[ucBatterySampleFiterCount] = HAL_BatteryADCPhysicalVoltage();
+  85   1        
+  86   1        ucBatterySampleFiterCount ++ ;
+  87   1        
+  88   1        if(ucBatterySampleFiterCount >= BATTERY_SAMPLE_DATA_LEN)
+  89   1        {
+  90   2          ucBatterySampleFiterCount = 0;
+  91   2        }
+  92   1        
+  93   1          for(ucLoop = 0; ucLoop < BATTERY_SAMPLE_DATA_LEN; ucLoop++)
+  94   1        {
+  95   2          ulBatteryValue +=(ULONG)usBatterySampleFiterValue[ucLoop];
+  96   2        }
+  97   1      
+  98   1        ulBatteryValue =ulBatteryValue/ BATTERY_SAMPLE_DATA_LEN;
+  99   1      
+ 100   1      //  ucAdcTestValue[2] = ulBatteryValue&0xff;
+ 101   1      //  ucAdcTestValue[1] = (ulBatteryValue>>8)&0xff;     
+ 102   1      //  ucAdcTestValue[0] = 0xff;
+ 103   1      //  BatteryUartSendValue(ucAdcTestValue);
+ 104   1        
+ 105   1        return (USHORT)ulBatteryValue;
+ 106   1      }
+ 107          
+ 108          
+ 109          /**************************************************************************
+ 110          * @function name:     BatterySampleFrequence
+ 111          * @Description:       Set Battery sample frequence count--500ms
+ 112          * @param:     
+ 113          * @return:      NA
+ 114          * @Author:      
+C51 COMPILER V9.54   HAL_BATTERY                                                           03/10/2021 14:40:16 PAGE 3   
+
+ 115          * @Date:      
+ 116          ***************************************************************************/
+ 117          void BatterySampleFrequence(void)
+ 118          { 
+ 119   1      
+ 120   1        usBatterySampleTimerCount++;  // This is defined for Battery ADC sample frequence
+ 121   1        
+ 122   1        if(boBatteryTemperatureOver == TRUE)
+ 123   1        {
+ 124   2          ucBatteryTemperatureOverCount++;
+ 125   2        }
+ 126   1        
+ 127   1        return;
+ 128   1      }
+ 129          /**************************************************************************
+ 130          * @function name:     TemperatureOverStateGet
+ 131          * @Description:     Temperature exceed limit
+ 132          * @param:
+ 133          * @return:        boBatteryTemperatureOver
+ 134          * @Author:
+ 135          * @Date:
+ 136          ***************************************************************************/
+ 137          BOOL TemperatureOverStateGet(void)
+ 138          {
+ 139   1        return boBatteryTemperatureOver;
+ 140   1      }
+ 141          
+ 142          /**************************************************************************
+ 143          * @function name:     TemperatureOverStateSet
+ 144          * @Description:     boTemperature
+ 145          * @param:
+ 146          * @return:        NA
+ 147          * @Author:
+ 148          * @Date:
+ 149          ***************************************************************************/
+ 150          void TemperatureOverStateSet(BOOL boTemperature)
+ 151          {
+ 152   1        boBatteryTemperatureOver = boTemperature;
+ 153   1      
+ 154   1        return;
+ 155   1      }
+ 156          #ifdef LOWPOWER_DISABLEMOTOR
+              /**************************************************************************
+              * @function name:     BatteryCapacityStateGet
+              * @Description:     Battery capacity low than 3.1V
+              * @param:
+              * @return:        boBatteryCapacityLow
+              * @Author:
+              * @Date:
+              ***************************************************************************/
+              BOOL BatteryCapacityStateGet(void)
+              {
+                return boBatteryCapacityLow;
+              }
+              
+              /**************************************************************************
+              * @function name:     BatteryCapacityStateSet
+              * @Description:     boBatteryCapacity
+              * @param:
+              * @return:        NA
+              * @Author:
+              * @Date:
+C51 COMPILER V9.54   HAL_BATTERY                                                           03/10/2021 14:40:16 PAGE 4   
+
+              ***************************************************************************/
+              void BatteryCapacityStateSet(BOOL boBatteryCapacity)
+              {
+                boBatteryCapacityLow = boBatteryCapacity;
+              
+                return;
+              }
+              #endif
+ 185          /**************************************************************************
+ 186          * @function name:     HAL_BatteryMonitor
+ 187          * @Description:       Charge/Temperature/Power Low Monitor
+ 188          * @param:     
+ 189          * @return:      NA
+ 190          * @Author:      
+ 191          * @Date:      
+ 192          ***************************************************************************/
+ 193          void HAL_BatteryMonitor(void)
+ 194          {
+ 195   1        USHORT usBatteryValue = 0;
+ 196   1        CHAR   cBatteryTemperature = 0;
+ 197   1        
+ 198   1        TemperatureWarning();
+ 199   1      
+ 200   1        if(usBatterySampleTimerCount < CHARGE_LED_FREQUENCE) //500ms sample once and run this logic
+ 201   1        {
+ 202   2          return;
+ 203   2        }
+ 204   1        
+ 205   1          /*Button lights is high priority*/
+ 206   1        if((IsButtonPressed() == TRUE) ||  
+ 207   1          (DEVICE_APP_STATE_SLEEP == DeviceApp_GetSystemState()))     
+ 208   1        {
+ 209   2          if(DEVICE_APP_STATE_Charge != DeviceApp_GetSystemState())
+ 210   2          {
+ 211   3            BatterySampleTimerCountClear();
+ 212   3                
+ 213   3            return;
+ 214   3          }
+ 215   2        }
+ 216   1        
+ 217   1        /*Monitor Battery Temperature*/
+ 218   1        cBatteryTemperature = HAL_TemperatureMonitor(); 
+ 219   1        //cBatteryTemperature = 25;
+ 220   1      
+ 221   1        usBatteryValue = BatterySampleFiter();//HAL_BatteryADCPhysicalVoltage(); /*Battery actually value*/
+ 222   1        
+ 223   1        /*
+ 224   1        if(usBatteryValue == NULL)  //avoid the value is invalid
+ 225   1        {
+ 226   1          //BatteryUartSendString("ulBatteryValueNULL\r\n");
+ 227   1          return;
+ 228   1        }
+ 229   1        */
+ 230   1          
+ 231   1        /*Battery < 3.1V Off 10s Off*/
+ 232   1        #if 1
+ 233   1        /*Low Power auto off*/
+ 234   1        if(DEVICE_APP_STATE_Charge != DeviceApp_GetSystemState())
+ 235   1        {
+ 236   2              /*Make sure Batrery sample is stable*/
+ 237   2          if(usBatteryValue < BATTERY_CAPACITY_TEN_PERCENT)
+ 238   2          {
+C51 COMPILER V9.54   HAL_BATTERY                                                           03/10/2021 14:40:16 PAGE 5   
+
+ 239   3            ucDeviceAutoOff_TenSec++;
+ 240   3            if(ucDeviceAutoOff_TenSec >= BATTERY_SAMPLE_STABLE_TEN_SEC)
+ 241   3            {
+ 242   4      //        BatteryUartSendString("ucDeviceAutoOff_TenSec\r\n");
+ 243   4              DeviceOff();
+ 244   4              return;
+ 245   4            }
+ 246   3          }
+ 247   2          else
+ 248   2          {
+ 249   3            ucDeviceAutoOff_TenSec=0;
+ 250   3          }
+ 251   2      
+ 252   2        }
+ 253   1        #endif
+ 254   1        /*need add no Button pressed logic*/
+ 255   1        if(IsChargeDCInput()== TRUE)
+ 256   1        {
+ 257   2          //DeviceApp_SetAppState(DEVICE_APP_STATE_Charge);
+ 258   2          //BatteryUartSendString("DEVICE_APP_STATE_Charge\r\n");
+ 259   2          if((cBatteryTemperature >= BATTERY_CHARGE_TEMPERATURE_MAX)||(cBatteryTemperature <= BATTERY_CHARGE_TEMPE
+             -RATURE_MIN))
+ 260   2          {
+ 261   3            /*Charge Temperature over run*/
+ 262   3            
+ 263   3            if(TemperatureOverStateGet() == FALSE)
+ 264   3            {
+ 265   4              ChargeFunctionDisable();
+ 266   4              TemperatureOverStateSet(TRUE);
+ 267   4            }
+ 268   3            
+ 269   3            BatteryUartSendString("ChargeDisable\r\n");
+ 270   3            
+ 271   3          }
+ 272   2          else 
+ 273   2          {
+ 274   3            if(TemperatureOverStateGet() == TRUE)
+ 275   3            {
+ 276   4              TemperatureOverStateSet(FALSE);
+ 277   4            }
+ 278   3              
+ 279   3            if(IsChargeComplete() == TRUE)
+ 280   3            {
+ 281   4              /*Charge Complete*/
+ 282   4              ChargeFunctionDisable();
+ 283   4              LEDCurrentState(LED_ON);
+ 284   4              BatteryUartSendString("FullCharge\r\n");
+ 285   4            }
+ 286   3            else
+ 287   3            {     
+ 288   4              /*Charging*/        
+ 289   4              ChargeFunctionEnable();
+ 290   4              LEDCurrentState(LED_FLASH);
+ 291   4              BatteryUartSendString("Charging\r\n");
+ 292   4            }
+ 293   3          }     
+ 294   2        }
+ 295   1        else
+ 296   1        { 
+ 297   2          /*Discharge Part*/
+ 298   2          if((cBatteryTemperature >= BATTERY_WORK_TEMPERATURE_MAX) || (cBatteryTemperature <= BATTERY_WORK_TEMPERA
+             -TURE_MIN))
+C51 COMPILER V9.54   HAL_BATTERY                                                           03/10/2021 14:40:16 PAGE 6   
+
+ 299   2          {
+ 300   3            if(TemperatureOverStateGet() == FALSE)
+ 301   3            {
+ 302   4              /*Need Add other funtion to avoid button and motor*/
+ 303   4              
+ 304   4              TemperatureOverStateSet(TRUE);
+ 305   4            }
+ 306   3          }
+ 307   2          else
+ 308   2          {   
+ 309   3            /*Clear Temperature Flag*/
+ 310   3            if(TemperatureOverStateGet() == TRUE)
+ 311   3            {
+ 312   4              TemperatureOverStateSet(FALSE);
+ 313   4            }
+ 314   3      #ifdef LOWPOWER_DISABLEMOTOR
+                    /*< 3.2V, Stop Motor*/
+                    if (usBatteryValue < BATTERY_CAPACITY_SIXTEEN_PERCENT)
+                    {               
+                      if (BatteryCapacityStateGet() == FALSE)
+                      {
+                        ucBatteryLess_3200MV ++ ;
+                        if(ucBatteryLess_3200MV >= BATTERY_SAMPLE_STABLE_TEN_SEC)
+                        {
+                          BatteryCapacityStateSet(TRUE);
+                          ucBatteryLess_3200MV = 0;
+                        }
+                      }
+                    }
+                    else
+                    {
+                      if (BatteryCapacityStateGet() == TRUE)
+                      {
+                        BatteryCapacityStateSet(FALSE);
+                      }
+                      ucBatteryLess_3200MV = 0;
+                    }
+              #endif
+ 337   3            /*LED Indicate*/
+ 338   3            if(usBatteryValue >= BATTERY_CAPACITY_THIRTYTHREE_PERCENT)         
+ 339   3            {
+ 340   4                /*>3.4V Motor ON LED ON*/
+ 341   4                LEDCurrentState(LED_ON);
+ 342   4                boBatteryLowIndicate = FALSE;
+ 343   4                ucBatteryLess_3400MV = 0;
+ 344   4                BatteryUartSendString("BatteryEnough\r\n");
+ 345   4            }
+ 346   3            else if(usBatteryValue < BATTERY_CAPACITY_THIRTYTHREE_PERCENT)
+ 347   3            {                 
+ 348   4                if(boBatteryLowIndicate == FALSE)
+ 349   4                {
+ 350   5                  ucBatteryLess_3400MV ++ ;
+ 351   5                  if(ucBatteryLess_3400MV >= BATTERY_SAMPLE_STABLE_TEN_SEC)
+ 352   5                  {
+ 353   6                    boBatteryLowIndicate =TRUE;
+ 354   6                    ucBatteryLess_3400MV = 0;
+ 355   6                  }
+ 356   5                }
+ 357   4                else
+ 358   4                { 
+ 359   5                  LEDCurrentState(LED_FLASH);
+ 360   5                  
+C51 COMPILER V9.54   HAL_BATTERY                                                           03/10/2021 14:40:16 PAGE 7   
+
+ 361   5                  BatteryUartSendString("LowPowerLess3.4\r\n");   
+ 362   5                }
+ 363   4        
+ 364   4          
+ 365   4            }
+ 366   3          }
+ 367   2        }
+ 368   1      
+ 369   1        BatterySampleTimerCountClear();
+ 370   1        return;
+ 371   1      }
+ 372          
+ 373          /**************************************************************************
+ 374          * @function name:     LEDTemperatureWarning
+ 375          * @Description:       Temperature warning make LED indicate   
+ 376          * @param:     
+ 377          * @return:            NA
+ 378          * @Author:      
+ 379          * @Date:      
+ 380          ***************************************************************************/
+ 381          void TemperatureWarning(void)
+ 382          {
+ 383   1        if(ucBatteryTemperatureOverCount >= TEMPERATUREOVER_200MS)
+ 384   1        {
+ 385   2          if(ucBatteryTemperatureOverPeriod < TEMPERATUREOVER_1000MS)
+ 386   2          {
+ 387   3            LEDCurrentState(LED_FLASH);
+ 388   3          }
+ 389   2          else if((ucBatteryTemperatureOverPeriod >=TEMPERATUREOVER_1000MS)&&(ucBatteryTemperatureOverPeriod <=TEM
+             -PERATUREOVER_3000MS)) // 2s OFF
+ 390   2          {
+ 391   3            LEDCurrentState(LED_OFF);
+ 392   3          }
+ 393   2          else
+ 394   2          {
+ 395   3            ucBatteryTemperatureOverPeriod = 0;
+ 396   3          } 
+ 397   2          ucBatteryTemperatureOverPeriod++;
+ 398   2          ucBatteryTemperatureOverCount = 0;
+ 399   2        }
+ 400   1        
+ 401   1        return;
+ 402   1      }
+ 403          
+ 404          /**************************************************************************
+ 405          * @function name:     BatterySampleTimerCountClear
+ 406          * @Description:       Clear Paramemeter
+ 407          * @param:     
+ 408          * @return:            NA
+ 409          * @Author:      
+ 410          * @Date:      
+ 411          ***************************************************************************/
+ 412          void BatterySampleTimerCountClear(void)
+ 413          {
+ 414   1        if(usBatterySampleTimerCount >= CHARGE_LED_FREQUENCE)   
+ 415   1        {
+ 416   2          usBatterySampleTimerCount = 0;
+ 417   2        }
+ 418   1        return;
+ 419   1      }
+ 420          
+ 421          /**************************************************************************
+C51 COMPILER V9.54   HAL_BATTERY                                                           03/10/2021 14:40:16 PAGE 8   
+
+ 422          * @function name:     BatterySampleParamClear
+ 423          * @Description:     
+ 424          * @param:     
+ 425          * @return:            NA
+ 426          * @Author:      
+ 427          * @Date:      
+ 428          ***************************************************************************/
+ 429          void BatterySampleParamClear(void)
+ 430          {
+ 431   1        usBatterySampleTimerCount = 0;
+ 432   1        ucDeviceAutoOff_TenSec = 0;
+ 433   1        
+ 434   1        TemperatureOverStateSet(FALSE);
+ 435   1      
+ 436   1        
+ 437   1        boBatteryLowIndicate = FALSE;
+ 438   1      
+ 439   1        ucBatteryTemperatureOverCount = 0;
+ 440   1        ucBatteryTemperatureOverPeriod = 0;
+ 441   1          
+ 442   1        ucBatteryLess_3400MV = 0;
+ 443   1        
+ 444   1      #ifdef LOWPOWER_DISABLEMOTOR
+                ucBatteryLess_3200MV = 0;
+                BatteryCapacityStateSet(FALSE);
+              #endif
+ 448   1        
+ 449   1        return;
+ 450   1      }
+ 451          
+ 452          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    625    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =     29       8
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

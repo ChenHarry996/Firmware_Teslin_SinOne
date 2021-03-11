@@ -1,0 +1,16 @@
+"STARTUP.obj",
+"main.obj",
+"EX_Init.obj",
+"HAL_Button.obj",
+"HAL_Battery.obj",
+"HAL_Temperature.obj",
+"Device.obj",
+"DRV_ADC.obj",
+"DRV_GPIO.obj",
+"DRV_PWM.obj",
+"DRV_Timer.obj",
+"DRV_Uart.obj" 
+TO "Teslin" 
+
+CLASSES (CODE(C:0X100),
+CONST(C:0X100)) 

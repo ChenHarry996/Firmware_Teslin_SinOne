@@ -1,0 +1,201 @@
+C51 COMPILER V9.54   HAL_TEMPERATURE                                                       03/10/2021 14:40:16 PAGE 1   
+
+
+C51 COMPILER V9.54, COMPILATION OF MODULE HAL_TEMPERATURE
+OBJECT MODULE PLACED IN HAL_Temperature.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE HAL\HAL_Temperature.c COMPACT OMF2 OPTIMIZE(8,SIZE) BROWSE DEFINE(XUART_
+                    -LOG,XMOTOR_PARAM_TEST,TIME2_ENABLE,XDC_INTERRUPT,VIB_TIME_ENABLE,FOUR_BUTTON,xLOWPOWER_DISABLEMOTOR) DEBUG PRINT(.\HAL_T
+                    -emperature.lst) TABS(2) OBJECT(HAL_Temperature.obj)
+
+line level    source
+
+   1          /*******************************************************************
+   2          Copyright 
+   3          File name: HAL_Temperature.c
+   4          Author:    Harry.Chen
+   5          ID: 
+   6          Version: 
+   7          Date: 
+   8          Description: 
+   9          Others: 
+  10          History: 
+  11              1.  Date:
+  12                Author: 
+  13                ID:
+  14                Modification:
+  15              2.  Date:
+  16                Author: 
+  17                ID:
+  18                Modification:
+  19          *******************************************************************/
+  20          
+  21          #include "H/Function_Init.H"
+  22          
+  23          
+  24          code NTC_RESISTANCE_TEMPERATURE_MAP_S stNtcResistanceTemperatureMap[] = 
+  25          {
+  26          
+  27          //  {-40 , 4310000},
+  28          //  {-35 , 3045000},
+  29          //  {-30 , 2176000},
+  30          //  {-25 , 1573000},
+  31          //  {-20 , 1148000},
+  32          //  {-15 ,  846600},
+  33          //  {-10 ,  630000},
+  34            {-5  ,  473000},  
+  35            { 0  ,  358200},
+  36            { 5  ,  273400},
+  37            { 10 ,  210200},
+  38            { 15 ,  162900},
+  39            { 20 ,  127200},
+  40            { 25 ,  100000},
+  41            { 30 ,   79210},
+  42            { 35 ,   63150},
+  43            { 40 ,   50670},
+  44            { 45 ,   40900},
+  45            { 50 ,   33190},
+  46            { 55 ,   27090},
+  47            { 60 ,   22220},
+  48            { 65 ,   18320},      
+  49          //  { 70 ,   15180},
+  50          //  { 75 ,   12640},
+  51          //  { 80 ,   10570},
+  52          //  { 85 ,    8873},
+  53          //  { 90 ,    7468},
+C51 COMPILER V9.54   HAL_TEMPERATURE                                                       03/10/2021 14:40:16 PAGE 2   
+
+  54          //  { 95 ,    6307},
+  55          //  {100 ,    5353},
+  56          //  {105 ,    4568},
+  57          //  {110 ,    3918},
+  58          //  {115 ,    3374},  
+  59          //  {120 ,    2916},
+  60          //  {125 ,    2527},
+  61          };
+  62          
+  63          /**************************************************************************
+  64          * @function name:     TemperatureValueGet
+  65          * @Description:     
+  66          * @param:     
+  67          * @return:      Temperature ADC Sample Value
+  68          * @Author:      
+  69          * @Date:      
+  70          ***************************************************************************/
+  71          USHORT TemperatureValueGet(void)
+  72          {
+  73   1        USHORT  usTemperatureSampleValue = 0;
+  74   1        
+  75   1        usTemperatureSampleValue = ADC_Sample(ADC_TEMPERATURE_CHANNEL);
+  76   1      
+  77   1        return usTemperatureSampleValue;
+  78   1      }
+  79          
+  80          
+  81          /**************************************************************************
+  82          * @function name:     HAL_TemperatureMonitor
+  83          * @Description:     
+  84          * @param:     
+  85          * @return:            Temperature physical value
+  86          * @Author:      
+  87          * @Date:      
+  88          ***************************************************************************/
+  89          CHAR HAL_TemperatureMonitor(void)
+  90          {
+  91   1          USHORT usTemperatureAdcVol = 0;
+  92   1          float fNtcResistance = 0.0;/* The value of a temperature sensor, in ohms*/
+  93   1          ULONG ulNtcResistance = 0;/* The value of a temperature sensor, in ohms*/
+  94   1          ULONG ulResistanceTemp0 = 0;
+  95   1          ULONG ulResistanceTemp1 = 0;
+  96   1          CHAR  cNtcTemperature = 0;
+  97   1          UCHAR ucLoop = 0;
+  98   1          USHORT usMapSize = 0;/*MAP size*/
+  99   1      //    UCHAR ucTestValue[3]={0};
+ 100   1          
+ 101   1          usTemperatureAdcVol = TemperatureValueGet();
+ 102   1      
+ 103   1          usMapSize = sizeof(stNtcResistanceTemperatureMap) / sizeof(NTC_RESISTANCE_TEMPERATURE_MAP_S);
+ 104   1        
+ 105   1      #if 1
+ 106   1          /* Check ADC Sample value is in range*/
+ 107   1          if ((usTemperatureAdcVol >= 4096) || (0 == usTemperatureAdcVol))
+ 108   1          {
+ 109   2              TEMPERATUREUartSendString("usTemperatureAdcVol overflow!");
+ 110   2                  
+ 111   2              cNtcTemperature = 255;
+ 112   2      
+ 113   2              return cNtcTemperature;
+ 114   2          }
+ 115   1      #endif    
+C51 COMPILER V9.54   HAL_TEMPERATURE                                                       03/10/2021 14:40:16 PAGE 3   
+
+ 116   1      
+ 117   1      
+ 118   1         fNtcResistance = ((usTemperatureAdcVol*100000 )/(4096.0 - usTemperatureAdcVol));
+ 119   1      
+ 120   1         ulNtcResistance = (ULONG)fNtcResistance;
+ 121   1      
+ 122   1      
+ 123   1          /*Resistance too large or too small above the critical value take the critical temperature*/
+ 124   1          if (ulNtcResistance > stNtcResistanceTemperatureMap[0].ulResistance)
+ 125   1          {
+ 126   2              cNtcTemperature = stNtcResistanceTemperatureMap[0].cTemperature;
+ 127   2          }
+ 128   1          else if (ulNtcResistance < stNtcResistanceTemperatureMap[usMapSize - 1].ulResistance)
+ 129   1          {
+ 130   2              cNtcTemperature = stNtcResistanceTemperatureMap[usMapSize - 1].cTemperature;
+ 131   2          }
+ 132   1          else
+ 133   1          {
+ 134   2              /* Traverse the temperature MAP resistance value to get the temperature*/
+ 135   2              for (ucLoop = 1; ucLoop < usMapSize; ucLoop++)
+ 136   2              {
+ 137   3                  ulResistanceTemp0 = stNtcResistanceTemperatureMap[ucLoop - 1].ulResistance;
+ 138   3                  ulResistanceTemp1 = stNtcResistanceTemperatureMap[ucLoop].ulResistance;
+ 139   3                      
+ 140   3                  if ((ulNtcResistance <= ulResistanceTemp0) && (ulNtcResistance >= ulResistanceTemp1))
+ 141   3                  {
+ 142   4                        /*Need to confirm which temperature more close*/
+ 143   4                      if ((ulNtcResistance - ulResistanceTemp1) < (ulResistanceTemp0 - ulNtcResistance))        
+             -           
+ 144   4                      {
+ 145   5                          /*The logic follows that the resistance value is close to Temp1*/
+ 146   5                          cNtcTemperature = stNtcResistanceTemperatureMap[ucLoop].cTemperature;
+ 147   5                      }
+ 148   4                      else/*The logic follows that the resistance value is close to Temp0*/
+ 149   4                      {
+ 150   5                          cNtcTemperature = stNtcResistanceTemperatureMap[ucLoop - 1].cTemperature;
+ 151   5                      }
+ 152   4      
+ 153   4                      break;
+ 154   4                  }
+ 155   3              }
+ 156   2          }
+ 157   1      //       ucTestValue[0] = cNtcTemperature;
+ 158   1      //       ucTestValue[1] = 0xff;
+ 159   1      //       ucTestValue[2] = '\0';
+ 160   1      //       TEMPERATUREUartSendString(ucTestValue);
+ 161   1      
+ 162   1           return cNtcTemperature;
+ 163   1      
+ 164   1      }
+ 165          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    492    ----
+   CONSTANT SIZE    =     75    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----      22
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+C51 COMPILER V9.54   HAL_TEMPERATURE                                                       03/10/2021 14:40:16 PAGE 4   
+
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

@@ -1,0 +1,1278 @@
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 1   
+
+
+C51 COMPILER V9.54, COMPILATION OF MODULE HAL_BUTTON
+OBJECT MODULE PLACED IN HAL_Button.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE HAL\HAL_Button.c COMPACT OMF2 OPTIMIZE(8,SIZE) BROWSE DEFINE(XUART_LOG,X
+                    -MOTOR_PARAM_TEST,TIME2_ENABLE,XDC_INTERRUPT,VIB_TIME_ENABLE,FOUR_BUTTON,xLOWPOWER_DISABLEMOTOR) DEBUG PRINT(.\HAL_Button
+                    -.lst) TABS(2) OBJECT(HAL_Button.obj)
+
+line level    source
+
+   1          /*******************************************************************
+   2          Copyright 
+   3          File name: HAL_Button.c
+   4          Author:    Harry.Chen
+   5          ID: 
+   6          Version: 
+   7          Date: 
+   8          Description: 
+   9          Others: 
+  10          History: 
+  11              1.  Date:
+  12                Author: 
+  13                ID:
+  14                Modification:
+  15              2.  Date:
+  16                Author: 
+  17                ID:
+  18                Modification:
+  19          *******************************************************************/
+  20          #include "H/Function_Init.H"
+  21          #include "HAL/HAL_Button.h"
+  22          
+  23          /*Set button default status BUTTON_STATUS_RELEASED*/
+  24          //BUTTON_STATUS_E g_enButtonStatus = BUTTON_STATUS_RELEASED;
+  25          STATIC USHORT usPowerButtonDuration = 0;
+  26          STATIC USHORT usPowerButtonReleasedDuration = 0;
+  27          STATIC USHORT usButtonBoardDuration = 0;
+  28          
+  29          STATIC BOOL boPowerButtonISRTrigged =FALSE;
+  30          STATIC BOOL boPowerButtonReleased = FALSE;
+  31          STATIC BOOL boStopRegisterClear = FALSE;
+  32          STATIC BOOL boIsPowerButtonValidPressed = FALSE;
+  33          STATIC BOOL boButtonBoardStartSample = FALSE;
+  34          STATIC BOOL boEnableMotorSmoothUpdate = FALSE;
+  35          STATIC BOOL boMotorIndicated = FALSE;
+  36          
+  37          STATIC UCHAR ucButtonBoardPressed[BUTTON_PRESSED_NONE+1]={0};
+  38          STATIC UCHAR ucIsButtonBoardEventTrigged[BUTTON_PRESSED_NONE+1]={0};
+  39          STATIC UCHAR ucVIBPWMDutyCycle = PWM_DUTY_CYCLE_VIB_DEFAULT_MIN;
+  40          STATIC UCHAR ucPATPWMDutyCycle = PWM_DUTY_CYCLE_PAT_MIN;
+  41          STATIC UCHAR ucMotorExerciseLevel = EXERCISE_LEVEL_ONE;
+  42          STATIC UCHAR ucMotorIndicateCount = 0;
+  43          STATIC UCHAR ucMotorIndicateNumber = 0;
+  44          STATIC UCHAR ucVIBMotorStep = 0;
+  45          STATIC UCHAR ucPATMotorStep = 0;
+  46          STATIC UCHAR ucVIBCurrentDutyCycle = 0;
+  47          STATIC UCHAR ucPATCurrentDutyCycle = 0;
+  48          STATIC UCHAR ucMotorChangePeriodCount = 0;
+  49          
+  50          PWM_DUTY_MAP_S g_astPWMDutyMap[DEVICE_MOTOR_MODE_NUMBER+1] = 
+  51          {
+  52            {0, 0, 0},
+  53            {DEVICE_MOTOR_CASE_ONE,   PWM_DUTY_CYCLE_VIB_CASE_ONE_MIN,  PWM_DUTY_CYCLE_VIB_CASE_ONE_MAX},
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 2   
+
+  54            {DEVICE_MOTOR_CASE_TWO,   PWM_DUTY_CYCLE_VIB_CASE_TWO_MIN,  PWM_DUTY_CYCLE_VIB_CASE_TWO_MAX},
+  55            {DEVICE_MOTOR_CASE_THREE,   PWM_DUTY_CYCLE_VIB_CASE_THREE_MIN,  PWM_DUTY_CYCLE_VIB_CASE_THREE_MAX},
+  56          };
+  57          
+  58          /*PAT exercise level */
+  59          EXERCISE_LEVEL_MAP_S g_astExerciseLevelMap[EXERCISE_LEVEL_BOTT] =
+  60          {
+  61            {EXERCISE_LEVEL_RESERVED, 0},
+  62            {EXERCISE_LEVEL_ONE,      EXERCISE_LEVEL_ONE_DUTY},
+  63            {EXERCISE_LEVEL_TWO,    EXERCISE_LEVEL_TWO_DUTY},
+  64            {EXERCISE_LEVEL_THREE,    EXERCISE_LEVEL_THREE_DUTY},
+  65            {EXERCISE_LEVEL_FOUR,     EXERCISE_LEVEL_FOUR_DUTY},
+  66            {EXERCISE_LEVEL_FIVE,     EXERCISE_LEVEL_FIVE_DUTY},
+  67            {EXERCISE_LEVEL_SIX,      EXERCISE_LEVEL_SIX_DUTY},
+  68            {EXERCISE_LEVEL_SEVEN,    EXERCISE_LEVEL_SEVEN_DUTY},
+  69            {EXERCISE_LEVEL_EIGHT,    EXERCISE_LEVEL_EIGHT_DUTY},
+  70            {EXERCISE_LEVEL_NINE,     EXERCISE_LEVEL_NINE_DUTY},
+  71            {EXERCISE_LEVEL_TEN,      EXERCISE_LEVEL_TEN_DUTY},
+  72            {EXERCISE_LEVEL_ELEVEN,   EXERCISE_LEVEL_ELEVEN_DUTY},
+  73            {EXERCISE_LEVEL_TWELEVE,  EXERCISE_LEVEL_TWELEVE_DUTY},
+  74          };
+  75          
+  76          
+  77          void ButtonPressedPlusProcess(void);
+  78          void ButtonPressedMinusProcess(void); 
+  79          //void ButtonPressedLongPlusProcess(void);
+  80          void ButtonPressedLongMinusProcess(void);
+  81          void MotorStop(void);
+  82          //void UpDownPressedLed(BUTTON_PRESSED_E enButtonPressed);
+  83          void UpDownLedFlashCountClear(void);
+  84          void DeviceOff(void);
+  85          
+  86          BOOL IsPlusMinusFunctionLedFlashValid(BUTTON_PRESSED_E enButtonBoardsPressed);
+  87          /**************************************************************************
+  88          * @function name:     ButtonCurrentStatusGet
+  89          * @Description:     get button current status
+  90          * @param:     
+  91          * @return:      
+  92              BUTTON_EVENT_E: BUTTON_STATUS_PRESSED - event of press
+  93              BUTTON_EVENT_E: BUTTON_STATUS_RELEASED - event of release 
+  94          * @Author:      
+  95          * @Date:      
+  96          ***************************************************************************/
+  97          BUTTON_STATUS_E ButtonPhysicalStateGet(void)
+  98          {
+  99   1        BUTTON_STATUS_E enButtonStatus = BUTTON_STATUS_BOTT;
+ 100   1        
+ 101   1        if(POWER_BUTTON == 0)/*button pressed*/
+ 102   1        {
+ 103   2          //TimerUartSendString("PRESS\r\n");
+ 104   2          enButtonStatus = BUTTON_STATUS_PRESSED;
+ 105   2        }
+ 106   1        else/*button released*/
+ 107   1        {
+ 108   2          enButtonStatus = BUTTON_STATUS_RELEASED;
+ 109   2          //TimerUartSendString("No\r\n");
+ 110   2        }
+ 111   1      
+ 112   1        return enButtonStatus;
+ 113   1      }
+ 114          
+ 115          /**************************************************************************
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 3   
+
+ 116          * @function name:     IsPowerButtonPressed
+ 117          * @Description:     get button current status
+ 118          * @param:     
+ 119          * @return:      
+ 120                              TRUE: Power Button Pressed
+ 121                              FALSE:Power Button Release
+ 122          * @Author:      
+ 123          * @Date:      
+ 124          ***************************************************************************/
+ 125          BOOL IsPowerButtonPressed(void)
+ 126          {
+ 127   1        if (BUTTON_STATUS_PRESSED == ButtonPhysicalStateGet())
+ 128   1        {
+ 129   2            return TRUE;
+ 130   2        }
+ 131   1      
+ 132   1        return FALSE;
+ 133   1      }
+ 134          /**************************************************************************
+ 135          * @function name:     PowerButtonDebounce
+ 136          * @Description:       Debounce
+ 137          * @param:     
+ 138          * @return:      
+ 139                     Button Press/Release count
+ 140          * @Author:      
+ 141          * @Date:      
+ 142          ***************************************************************************/
+ 143          void PowerButtonDebounce(void)  
+ 144          {
+ 145   1        if(TRUE == boPowerButtonISRTrigged)
+ 146   1        {
+ 147   2           usPowerButtonDuration ++;
+ 148   2          }
+ 149   1        if(TRUE == boPowerButtonReleased)
+ 150   1        {
+ 151   2           usPowerButtonReleasedDuration ++;
+ 152   2        }
+ 153   1        return;
+ 154   1      }
+ 155          /**************************************************************************
+ 156          * @function name:     PowerButtonISRTrigged
+ 157          * @Description:        Trigger ISR
+ 158          * @param:     
+ 159          * @return:      
+ 160                     Button trigger interrupt, Then trigger Timer0 to count 
+ 161                     Button Press Time.
+ 162          * @Author:      
+ 163          * @Date:      
+ 164          ***************************************************************************/
+ 165          void PowerButtonISRTrigged(void)
+ 166          {     
+ 167   1        if(DEVICE_APP_STATE_Charge == DeviceApp_GetSystemState())
+ 168   1        {
+ 169   2          return;
+ 170   2        }
+ 171   1          boPowerButtonISRTrigged = TRUE;
+ 172   1        
+ 173   1        return;
+ 174   1      }
+ 175          /**************************************************************************
+ 176          * @function name:     IsButtonPressed
+ 177          * @Description:     Check Device Button Board is Pressed
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 4   
+
+ 178          * @param:     
+ 179          * @return:      
+ 180                               TRUE: Power Button Board Pressed
+ 181                               FALSE:Power Button Board Release        
+ 182          * @Author:      
+ 183          * @Date:      
+ 184          ***************************************************************************/
+ 185          BOOL IsButtonPressed(void)
+ 186          {
+ 187   1        UCHAR ucLoop = 0;
+ 188   1        BOOL boButtonBoardsPressed = FALSE;
+ 189   1        
+ 190   1        for(ucLoop=0; ucLoop<BUTTON_PRESSED_NONE; ucLoop++)
+ 191   1        {
+ 192   2          if(ucButtonBoardPressed[ucLoop]== TRUE)
+ 193   2          {
+ 194   3            boButtonBoardsPressed = TRUE;
+ 195   3          }
+ 196   2        }
+ 197   1        
+ 198   1        if((TRUE == boButtonBoardsPressed) || (TRUE == IsPowerButtonPressed()))
+ 199   1        {
+ 200   2          return TRUE;   
+ 201   2        }
+ 202   1        
+ 203   1        return FALSE;
+ 204   1      }
+ 205          /**************************************************************************
+ 206          * @function name:     PowerButtonProc
+ 207          * @Description:       Device ON/OFF
+ 208          * @param:     
+ 209          * @return:            NA         
+ 210          * @Author:      
+ 211          * @Date:      
+ 212          ***************************************************************************/
+ 213          void PowerButtonProc(void)
+ 214          {
+ 215   1      //  STATIC UCHAR sucCountValuePrint[1]={0};
+ 216   1      
+ 217   1      
+ 218   1        if(DEVICE_APP_STATE_Charge == DeviceApp_GetSystemState())
+ 219   1        {
+ 220   2          if(IsChargeDCInput() != TRUE)
+ 221   2          {
+ 222   3            DeviceApp_SetAppState(DEVICE_APP_STATE_SLEEP);
+ 223   3          }
+ 224   2          else
+ 225   2          {
+ 226   3            return;
+ 227   3          }
+ 228   2        } 
+ 229   1        else if(IsChargeDCInput()== TRUE)
+ 230   1        {
+ 231   2          PCON &= 0X80;
+ 232   2          DeviceApp_SetAppState(DEVICE_APP_STATE_Charge);
+ 233   2          WatchDogInit();
+ 234   2          ChargeFunctionEnable();
+ 235   2          ADBatteryPowerSupplyEnable(); 
+ 236   2          boPowerButtonISRTrigged=FALSE; 
+ 237   2          boIsPowerButtonValidPressed = FALSE;
+ 238   2          boPowerButtonReleased = FALSE;          
+ 239   2          usPowerButtonDuration=0;
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 5   
+
+ 240   2          usPowerButtonReleasedDuration=0;
+ 241   2          BatteryUartSendString("Charging Start\r\n");
+ 242   2          
+ 243   2          return;
+ 244   2        }
+ 245   1      
+ 246   1        /*Device ON/OFF*/
+ 247   1        if(IsPowerButtonPressed() == TRUE)
+ 248   1        { 
+ 249   2           boPowerButtonReleased = FALSE;         
+ 250   2           usPowerButtonReleasedDuration=0;   //Clear relevant data after button dither
+ 251   2           /* Clear Register value*/  
+ 252   2          if(boStopRegisterClear == FALSE)
+ 253   2          {
+ 254   3            PCON &= 0X80;                     // Clear STOP mode register     
+ 255   3            boStopRegisterClear = TRUE;
+ 256   3            boPowerButtonISRTrigged = TRUE;   //Avoid the second boot into the interrupt failure
+ 257   3            ButtonUartSendString("boStopRegisterClear\r\n");
+ 258   3          }
+ 259   2          if (BUTTON_DITHERING_INTERVAL_NUM == usPowerButtonDuration)
+ 260   2          {      
+ 261   3            boIsPowerButtonValidPressed = TRUE;
+ 262   3            ButtonUartSendString("boIsPowerButtonValidPressed\r\n");
+ 263   3          }
+ 264   2      
+ 265   2            
+ 266   2          if(usPowerButtonDuration >= BUTTON_PRESSED_DURATION_LONG)  
+ 267   2          {   
+ 268   3            if (DEVICE_APP_STATE_SLEEP == DeviceApp_GetSystemState())
+ 269   3            {
+ 270   4                WatchDogInit();
+ 271   4                LEDCurrentState(LED_ON);
+ 272   4                ChargeFunctionEnable();
+ 273   4                TouchFunctionEnable();
+ 274   4                ADBatteryPowerSupplyEnable(); 
+ 275   4                DeviceApp_SetAppState(DEVICE_APP_STATE_RUN);
+ 276   4                DeviceApp_SetAppModus(DEVICE_APP_MODUS_ONE);
+ 277   4                DeviceApp_SetMotorMode();
+ 278   4                ButtonUartSendString("ON\r\n");
+ 279   4            }
+ 280   3            else if (DEVICE_APP_STATE_RUN == DeviceApp_GetSystemState())
+ 281   3            {   
+ 282   4                DeviceOff();
+ 283   4            }
+ 284   3            boPowerButtonISRTrigged=FALSE;      
+ 285   3            usPowerButtonDuration=0;
+ 286   3          }
+ 287   2        }
+ 288   1        else
+ 289   1        {
+ 290   2          if(DEVICE_APP_STATE_RUN == DeviceApp_GetSystemState())
+ 291   2          {
+ 292   3            if (TRUE == boIsPowerButtonValidPressed)  // Power button release
+ 293   3            {
+ 294   4                boPowerButtonReleased = TRUE;
+ 295   4                ButtonUartSendString("Released\r\n");
+ 296   4      //        sucCountValuePrint[0]=usPowerButtonReleasedDuration;
+ 297   4      //        TimerUartSendString(sucCountValuePrint);
+ 298   4                if (usPowerButtonReleasedDuration >= BUTTON_RELEASE_DITHERING_INTERVAL_NUM)  //
+ 299   4                {
+ 300   5      #ifdef FOUR_BUTTON
+ 301   5                  
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 6   
+
+ 302   5      #else           
+                          if((usPowerButtonDuration >= BUTTON_PRESSED_DURATION_CLICK ) &&
+                            (usPowerButtonDuration <= BUTTON_PRESSED_DURATION_SHORT))
+                            {
+                              LEDCurrentState(PLUS_BUTTON_PRESS); 
+                              
+                              DeviceApp_SetMotorMode();
+                            }
+              #endif
+ 311   5                    boPowerButtonISRTrigged=FALSE; 
+ 312   5                    boIsPowerButtonValidPressed = FALSE;
+ 313   5                    boPowerButtonReleased = FALSE;          
+ 314   5                    ButtonUartSendString("boPowerButtonReleased\r\n");
+ 315   5                    usPowerButtonDuration=0;
+ 316   5                    usPowerButtonReleasedDuration=0;
+ 317   5                   /*Button Release process can be add there*/
+ 318   5                  
+ 319   5                }
+ 320   4            }
+ 321   3          }
+ 322   2          else if (DEVICE_APP_STATE_SLEEP == DeviceApp_GetSystemState())
+ 323   2          {     
+ 324   3            DeviceOff();
+ 325   3          }
+ 326   2        }
+ 327   1        return;
+ 328   1      }
+ 329          /**************************************************************************
+ 330          * @function name:     ButtonBoardsCheck
+ 331          * @Description:       Button Borads check press/release
+ 332          * @param:     
+ 333          * @return:      
+ 334                     ADC Sample check which button is pressed
+ 335          * @Author:      
+ 336          * @Date:      
+ 337          ***************************************************************************/
+ 338          BUTTON_PRESSED_E ButtonBoardsCheck(void)
+ 339          {
+ 340   1      //STATIC UCHAR sucButtonVoltagePrint[1]={0};  
+ 341   1        
+ 342   1        BUTTON_PRESSED_E enButtonPressed = BUTTON_PRESSED_NONE;
+ 343   1        STATIC USHORT usButtonAdcSamplelValue = 0;
+ 344   1        
+ 345   1        usButtonAdcSamplelValue = ADC_Sample(ADC_BUTTON_CHANNEL);
+ 346   1      //  sucButtonVoltagePrint[1] = usButtonAdcSamplelValue&0xff;
+ 347   1      //  sucButtonVoltagePrint[0] = (usButtonAdcSamplelValue>>8)&0xff; 
+ 348   1      //  TimerUartSendString(sucButtonVoltagePrint);
+ 349   1        if(usButtonAdcSamplelValue == NULL)
+ 350   1        {
+ 351   2          ButtonUartSendString("BUTTON_PRESSED_NONE\r\n");
+ 352   2          return enButtonPressed;
+ 353   2        }
+ 354   1      #ifdef FOUR_BUTTON
+ 355   1        else if((usButtonAdcSamplelValue >= (MODE_BUTTON_PHYSICAL_VOLTAGE - BUTTON_PHYSICAL_VOLTAGE_TOLOERANCE)) 
+             -&&
+ 356   1           (usButtonAdcSamplelValue <= (MODE_BUTTON_PHYSICAL_VOLTAGE + BUTTON_PHYSICAL_VOLTAGE_TOLOERANCE)))
+ 357   1        {
+ 358   2           enButtonPressed =  BUTTON_PRESSED_MODE;      
+ 359   2        }
+ 360   1      #endif
+ 361   1        else if((usButtonAdcSamplelValue >= (PLUS_BUTTON_PHYSICAL_VOLTAGE - BUTTON_PHYSICAL_VOLTAGE_TOLOERANCE)) 
+             -&&
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 7   
+
+ 362   1           (usButtonAdcSamplelValue <= (PLUS_BUTTON_PHYSICAL_VOLTAGE + BUTTON_PHYSICAL_VOLTAGE_TOLOERANCE)))
+ 363   1        {
+ 364   2           enButtonPressed =  BUTTON_PRESSED_PLUS;      
+ 365   2        }
+ 366   1        else if((usButtonAdcSamplelValue >= (MINUS_BUTTON_PHYSICAL_VOLTAGE - BUTTON_PHYSICAL_VOLTAGE_TOLOERANCE))
+             - &&
+ 367   1           (usButtonAdcSamplelValue <= (MINUS_BUTTON_PHYSICAL_VOLTAGE + BUTTON_PHYSICAL_VOLTAGE_TOLOERANCE)))
+ 368   1        {
+ 369   2           enButtonPressed =  BUTTON_PRESSED_MINUS;     
+ 370   2        }
+ 371   1        else if((usButtonAdcSamplelValue >= (PLUS_MINUS_BUTTON_PHYSICAL_VOLTAGE - BUTTON_PHYSICAL_VOLTAGE_TOLOERA
+             -NCE)) &&
+ 372   1           (usButtonAdcSamplelValue <= (PLUS_MINUS_BUTTON_PHYSICAL_VOLTAGE + BUTTON_PHYSICAL_VOLTAGE_TOLOERANCE)))
+ 373   1        {
+ 374   2      //    TimerUartSendString("BUTTON_PRESSED_PLUS_MINUS\r\n");
+ 375   2           enButtonPressed =  BUTTON_PRESSED_PLUS_MINUS;      
+ 376   2        } 
+ 377   1         return enButtonPressed;
+ 378   1      }
+ 379          /**************************************************************************
+ 380          * @function name:     ButtonBoardsCount
+ 381          * @Description:       Count Button Press time
+ 382          * @param:     
+ 383          * @return:      
+ 384                                Button pressed time
+ 385          * @Author:      
+ 386          * @Date:      
+ 387          ***************************************************************************/
+ 388          void ButtonBoardsCount(void)
+ 389          {
+ 390   1        UCHAR ucLoop = 0;
+ 391   1        
+ 392   1        boButtonBoardStartSample = TRUE;
+ 393   1      
+ 394   1        for(ucLoop=0; ucLoop < BUTTON_PRESSED_NONE; ucLoop++)
+ 395   1        {
+ 396   2          if(ucButtonBoardPressed[ucLoop]== TRUE)
+ 397   2          {
+ 398   3            usButtonBoardDuration ++;
+ 399   3          }
+ 400   2        }
+ 401   1        
+ 402   1        if(TRUE == boMotorIndicated)
+ 403   1        {
+ 404   2          ucMotorIndicateCount++;
+ 405   2        }
+ 406   1          
+ 407   1        return;
+ 408   1      }
+ 409          
+ 410          /**************************************************************************
+ 411          * @function name:     IsButtonBoardsPressed
+ 412          * @Description:       Button click valid
+ 413          * @param:             BUTTON_PRESSED_E enButtonPressed
+ 414          * @return:      
+ 415                                Button clicked
+ 416          * @Author:      
+ 417          * @Date:      
+ 418          ***************************************************************************/
+ 419          BOOL IsButtonBoardsPressed(BUTTON_PRESSED_E enButtonPressed)
+ 420          {
+ 421   1        if(TRUE == ucButtonBoardPressed[enButtonPressed])
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 8   
+
+ 422   1        {
+ 423   2      //    if((usButtonBoardDuration >= BUTTON_PRESSED_DURATION_CLICK ) &&
+ 424   2      //      (usButtonBoardDuration <= BUTTON_PRESSED_DURATION_SHORT))
+ 425   2          if(usButtonBoardDuration >= BUTTON_PRESSED_DURATION_CLICK ) 
+ 426   2          {
+ 427   3            return TRUE;
+ 428   3          }
+ 429   2        }
+ 430   1        //TimerUartSendString("IsButtonBoardsPressed FALSE\r\n");
+ 431   1        return FALSE;
+ 432   1      }
+ 433          /**************************************************************************
+ 434          * @function name:     ButtonBoardsProc
+ 435          * @Description:       Button Boards pressed to trigger event
+ 436          * @param:     
+ 437          * @return:      
+ 438                     Function should be trigged when button press 
+ 439          * @Author:      
+ 440          * @Date:      
+ 441          ***************************************************************************/
+ 442          void ButtonBoardsProc(void)
+ 443          {
+ 444   1        UCHAR ucLoop = 0;
+ 445   1        
+ 446   1        if((IsPowerButtonPressed() == TRUE)
+ 447   1          ||(DEVICE_APP_STATE_RUN != DeviceApp_GetSystemState())
+ 448   1          || (TRUE == TemperatureOverStateGet()))
+ 449   1        {
+ 450   2          return;
+ 451   2        }
+ 452   1        if(TRUE == boButtonBoardStartSample) // 5ms to sample one ADC data
+ 453   1        {
+ 454   2          boButtonBoardStartSample = FALSE;
+ 455   2          /*Check if there has any button pressed*/
+ 456   2      #ifdef FOUR_BUTTON    
+ 457   2          /*Mode Button Check*/
+ 458   2          if(BUTTON_PRESSED_MODE == ButtonBoardsCheck())
+ 459   2          {     
+ 460   3            if(FALSE == ucButtonBoardPressed[BUTTON_PRESSED_MODE])
+ 461   3            {      
+ 462   4              ucButtonBoardPressed[BUTTON_PRESSED_MODE] = TRUE;  // Button  press to enable count
+ 463   4              //ButtonUartSendString("BUTTON_PRESSED_MODE\r\n");
+ 464   4            }
+ 465   3            else
+ 466   3            {
+ 467   4              LEDCurrentState(PLUS_BUTTON_PRESS);
+ 468   4      
+ 469   4              if(TRUE == IsButtonBoardsPressed(BUTTON_PRESSED_MODE))  // Button press time is valid
+ 470   4              {
+ 471   5                //ButtonUartSendString("IsButtonBoardsPreValid\r\n");
+ 472   5                if(FALSE == ucIsButtonBoardEventTrigged[BUTTON_PRESSED_MODE])
+ 473   5                {        
+ 474   6                   DeviceApp_SetMotorMode();
+ 475   6                   //DeviceAPP_ModusRun();
+ 476   6                   ucIsButtonBoardEventTrigged[BUTTON_PRESSED_MODE] = TRUE;  // Tigger event once
+ 477   6                   ButtonUartSendString("BUTTON_PRESSED_MODE\r\n");
+ 478   6                }
+ 479   5              }
+ 480   4            }
+ 481   3          }
+ 482   2          /*PLUS_MINUS Both Button Check*/
+ 483   2           else if(BUTTON_PRESSED_PLUS_MINUS == ButtonBoardsCheck())
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 9   
+
+ 484   2      #else
+                   if(BUTTON_PRESSED_PLUS_MINUS == ButtonBoardsCheck())
+              #endif
+ 487   2          {
+ 488   3            if(FALSE == ucButtonBoardPressed[BUTTON_PRESSED_PLUS_MINUS])
+ 489   3            {      
+ 490   4              ucButtonBoardPressed[BUTTON_PRESSED_PLUS_MINUS] = TRUE;   
+ 491   4              //PowerLEDON();  // PLUS OR MINUS LED will be trigged before this will cause LED OFF        
+ 492   4            }
+ 493   3      
+ 494   3            if(usButtonBoardDuration >= BUTTON_PRESSED_DURATION_LONG)  // Button press 2s to On/Off sensor
+ 495   3            {
+ 496   4              LEDCurrentState(BOTH_BUTTON_PRESS);
+ 497   4              
+ 498   4              if(FALSE == ucIsButtonBoardEventTrigged[BUTTON_PRESSED_PLUS_MINUS])
+ 499   4              {
+ 500   5                TouchFunctionSwitch();                                            // will add LED flash twice
+ 501   5                ucIsButtonBoardEventTrigged[BUTTON_PRESSED_PLUS_MINUS] = TRUE;  // Tigger event once
+ 502   5                ButtonUartSendString("BUTTON_PRESSED_PLUS_MINUS\r\n");
+ 503   5              }     
+ 504   4             }      
+ 505   3          }
+ 506   2          /*PLUS Button Check*/
+ 507   2          else if(BUTTON_PRESSED_PLUS == ButtonBoardsCheck())
+ 508   2          {
+ 509   3            if(TRUE == ucButtonBoardPressed[BUTTON_PRESSED_PLUS_MINUS])
+ 510   3            {
+ 511   4              ucButtonBoardPressed[BUTTON_PRESSED_PLUS] = FALSE;
+ 512   4                
+ 513   4              return;
+ 514   4            }
+ 515   3      
+ 516   3             if(FALSE == ucButtonBoardPressed[BUTTON_PRESSED_PLUS])
+ 517   3             {
+ 518   4               ucButtonBoardPressed[BUTTON_PRESSED_PLUS] = TRUE;
+ 519   4             }
+ 520   3             else
+ 521   3             {
+ 522   4              if(TRUE == IsPlusMinusFunctionLedFlashValid(BUTTON_PRESSED_PLUS))
+ 523   4              {
+ 524   5                LEDCurrentState(PLUS_BUTTON_PRESS);
+ 525   5              }
+ 526   4      
+ 527   4              if(TRUE == IsButtonBoardsPressed(BUTTON_PRESSED_PLUS))
+ 528   4              { 
+ 529   5                if(FALSE == ucIsButtonBoardEventTrigged[BUTTON_PRESSED_PLUS])
+ 530   5                {
+ 531   6                  ButtonPressedPlusProcess();
+ 532   6                  //DeviceAPP_ModusRun();
+ 533   6                  ucIsButtonBoardEventTrigged[BUTTON_PRESSED_PLUS] = TRUE;  // Tigger event once
+ 534   6                  ButtonUartSendString("BUTTON_PRESSED_PLUS\r\n");
+ 535   6                }      
+ 536   5              }
+ 537   4      
+ 538   4              if(usButtonBoardDuration >= BUTTON_PRESSED_DURATION_LONGER)  // Button press 10s to switch modus
+ 539   4              {
+ 540   5                if(FALSE == ucIsButtonBoardEventTrigged[BUTTON_PRESSED_PLUS_LONGER])
+ 541   5                {
+ 542   6                  ucIsButtonBoardEventTrigged[BUTTON_PRESSED_PLUS_LONGER] = TRUE;  // Tigger event once
+ 543   6                  //ButtonPressedPlusProcess();
+ 544   6                  //DeviceAPP_SetModus();
+ 545   6                  //MotorIndicate();
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 10  
+
+ 546   6                  boMotorIndicated = TRUE;
+ 547   6                  DeviceAPP_SetModus();           
+ 548   6                  ButtonUartSendString("BUTTON_PRESSED_PLUS_LONGER\r\n");
+ 549   6                }
+ 550   5      
+ 551   5                //ButtonPressedLongPlusProcess();           
+ 552   5              }            
+ 553   4             }
+ 554   3          }
+ 555   2          /*MINUS Button Check*/
+ 556   2          else if(BUTTON_PRESSED_MINUS == ButtonBoardsCheck())
+ 557   2          {
+ 558   3             if(TRUE == ucButtonBoardPressed[BUTTON_PRESSED_PLUS_MINUS])
+ 559   3             {
+ 560   4               ucButtonBoardPressed[BUTTON_PRESSED_MINUS] = FALSE;
+ 561   4              
+ 562   4               return;
+ 563   4             }
+ 564   3             
+ 565   3             if(FALSE == ucButtonBoardPressed[BUTTON_PRESSED_MINUS])
+ 566   3             {
+ 567   4                ucButtonBoardPressed[BUTTON_PRESSED_MINUS] = TRUE;
+ 568   4             }
+ 569   3             else
+ 570   3             {
+ 571   4              if(TRUE == IsPlusMinusFunctionLedFlashValid(BUTTON_PRESSED_MINUS))
+ 572   4              {
+ 573   5                LEDCurrentState(MINUS_BUTTON_PRESS);
+ 574   5              }
+ 575   4      
+ 576   4              if(TRUE == IsButtonBoardsPressed(BUTTON_PRESSED_MINUS))
+ 577   4              { 
+ 578   5                if(FALSE == ucIsButtonBoardEventTrigged[BUTTON_PRESSED_MINUS])
+ 579   5                {             
+ 580   6                  ButtonPressedMinusProcess();
+ 581   6                  ucIsButtonBoardEventTrigged[BUTTON_PRESSED_MINUS] = TRUE;  // Tigger event once
+ 582   6                  ButtonUartSendString("BUTTON_PRESSED_MINUS\r\n");
+ 583   6                }      
+ 584   5              }
+ 585   4                
+ 586   4              if(usButtonBoardDuration >= BUTTON_PRESSED_DURATION_LONG)  // Button press 2s to enter into falldown m
+             -ode
+ 587   4              {
+ 588   5                LEDCurrentState(MINUS_BUTTON_LONG_PRESS); 
+ 589   5                
+ 590   5                if(FALSE == ucIsButtonBoardEventTrigged[BUTTON_PRESSED_MINUS_LONG])
+ 591   5                {              
+ 592   6                  ButtonPressedLongMinusProcess();
+ 593   6                  ucIsButtonBoardEventTrigged[BUTTON_PRESSED_MINUS_LONG] = TRUE;  // Tigger event once
+ 594   6                  ButtonUartSendString("BUTTON_PRESSED_MINUS_LONG\r\n");
+ 595   6                }   
+ 596   5                        
+ 597   5              }  
+ 598   4             }
+ 599   3          }
+ 600   2            
+ 601   2          #if 0
+                  /*check if any button has been released, There can add some release logic*/
+                  else
+                  {
+              
+                    if (TRUE == IsButtonBoardsPressed(BUTTON_PRESSED_MODE))
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 11  
+
+                    {
+                      DeviceApp_SetMotorMode();
+                      ButtonUartSendString("BUTTON_RELEASED_MODE\r\n");
+                    }
+                    else if (TRUE == IsButtonBoardsPressed(BUTTON_PRESSED_PLUS_MINUS))
+                    {
+                      ButtonUartSendString("BUTTON_RELEASED_PLUS_MINUS\r\n");
+                    }
+                    else if (TRUE == IsButtonBoardsPressed(BUTTON_PRESSED_PLUS))
+                    {
+                      //ButtonPressedPlusProcess();
+                      if (TRUE == IsPlusFunctionLedFlashValid(BUTTON_PRESSED_PLUS))
+                      {
+                        LEDCurrentState(PLUS_BUTTON_PRESS);
+                      }
+              
+                      if (TRUE == IsButtonBoardsPressed(BUTTON_PRESSED_PLUS))
+                      {
+                        if (FALSE == ucIsButtonBoardEventTrigged[BUTTON_PRESSED_PLUS])
+                        {
+                          ButtonPressedPlusProcess();
+                          //DeviceAPP_ModusRun();
+                          ucIsButtonBoardEventTrigged[BUTTON_PRESSED_PLUS] = TRUE;  // Tigger event once
+                          ButtonUartSendString("BUTTON_PRESSED_PLUS\r\n");
+                        }
+                      }
+                      ButtonUartSendString("BUTTON_RELEASED_PLUS\r\n");
+                    }
+                    else if (TRUE == IsButtonBoardsPressed(BUTTON_PRESSED_MINUS))
+                    {
+                      //ButtonPressedMinusProcess();
+                      ButtonUartSendString("BUTTON_RELEASED_MINUS\r\n");
+                    }
+                    }
+              #endif
+ 642   2            else 
+ 643   2            {
+ 644   3              //TimerUartSendString(ucButtonBoardPressed);
+ 645   3              for (ucLoop = 0; ucLoop < BUTTON_PRESSED_NONE; ucLoop++)
+ 646   3              {
+ 647   4                ucButtonBoardPressed[ucLoop] = FALSE;
+ 648   4                ucIsButtonBoardEventTrigged[ucLoop] = FALSE;
+ 649   4              }
+ 650   3              usButtonBoardDuration = 0;
+ 651   3              //ucMotorIndicateCount = 0;
+ 652   3              //ucMotorIndicateNumber = 0;
+ 653   3              LedBlinkParamemterClear();
+ 654   3            }
+ 655   2          //}
+ 656   2            //TimerUartSendString("BUTTON_PRESSED_NONE\r\n");
+ 657   2        }
+ 658   1        return;
+ 659   1      }
+ 660          
+ 661          /**************************************************************************
+ 662          * @function name:     ButtonPressedPlusProcess
+ 663          * @Description:       Plus button function
+ 664          * @param:     
+ 665          * @return:            NA           
+ 666          * @Author:      
+ 667          * @Date:      
+ 668          ***************************************************************************/
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 12  
+
+ 669          
+ 670          void ButtonPressedPlusProcess(void)
+ 671          {
+ 672   1        UCHAR ucDeviceMotorMode = 0;
+ 673   1      //  STATIC UCHAR sucPWMDutyPrint[4]={0};
+ 674   1        
+ 675   1      //  ucPATPWMDutyCycle = PATMotorDutyCycleRegisterValueGet();
+ 676   1      //  ucVIBPWMDutyCycle = VIBMotorDutyCycleRegisterValueGet();
+ 677   1        ucDeviceMotorMode = DeviceApp_GetMotorMode();
+ 678   1      
+ 679   1        if (DEVICE_APP_MODUS_ONE == DeviceApp_GetModus())
+ 680   1        {
+ 681   2          if (ucVIBPWMDutyCycle < PWM_DUTY_CYCLE_VIB_DEFAULT_MAX)
+ 682   2          {
+ 683   3      
+ 684   3            ucVIBPWMDutyCycle = ucVIBPWMDutyCycle + PWM_DUTY_CYCLE_VIB_STEP;
+ 685   3      
+ 686   3          }
+ 687   2          else
+ 688   2          {
+ 689   3            ucVIBPWMDutyCycle = PWM_DUTY_CYCLE_VIB_DEFAULT_MAX;
+ 690   3          }
+ 691   2        } 
+ 692   1        else if( DEVICE_APP_MODUS_TWO == DeviceApp_GetModus())
+ 693   1        {
+ 694   2          if(ucVIBPWMDutyCycle < g_astPWMDutyMap[ucDeviceMotorMode].usPWMDutyMax)
+ 695   2          {
+ 696   3            /*if(ucVIBPWMDutyCycle < g_astPWMDutyMap[ucDeviceMotorMode].usPWMDutyMin)
+ 697   3            {
+ 698   3              ucVIBPWMDutyCycle= g_astPWMDutyMap[ucDeviceMotorMode].usPWMDutyMin;
+ 699   3            }*/
+ 700   3            ucVIBPWMDutyCycle = ucVIBPWMDutyCycle + PWM_DUTY_CYCLE_VIB_MODUES_TWO_STEP;
+ 701   3          }
+ 702   2          else
+ 703   2          {
+ 704   3            ucVIBPWMDutyCycle = g_astPWMDutyMap[ucDeviceMotorMode].usPWMDutyMax;
+ 705   3          }
+ 706   2        }
+ 707   1        
+ 708   1        if(ucPATPWMDutyCycle < PWM_DUTY_CYCLE_PAT_MAX)
+ 709   1        {   
+ 710   2          ucMotorExerciseLevel++;
+ 711   2          //ucPATPWMDutyCycle = ucPATPWMDutyCycle + PWM_DUTY_CYCLE_PAT_STEP;
+ 712   2      
+ 713   2        }
+ 714   1        else
+ 715   1        {
+ 716   2          ucMotorExerciseLevel = EXERCISE_LEVEL_TWELEVE;
+ 717   2          //ucPATPWMDutyCycle = PWM_DUTY_CYCLE_PAT_MAX;
+ 718   2        }
+ 719   1        ucPATPWMDutyCycle = g_astExerciseLevelMap[ucMotorExerciseLevel].ucPWMDuty;
+ 720   1      //  sucPWMDutyPrint[1] = ucVIBPWMDutyCycle;
+ 721   1      //  sucPWMDutyPrint[2] = ucPATPWMDutyCycle;
+ 722   1      //  sucPWMDutyPrint[3] = ucDeviceMotorMode;
+ 723   1      //  sucPWMDutyPrint[0] = 0xff;
+ 724   1      //  PWMUartSendString(sucPWMDutyPrint);
+ 725   1      
+ 726   1          
+ 727   1        return;
+ 728   1      }
+ 729          /**************************************************************************
+ 730          * @function name:     ButtonPressedMinusProcess
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 13  
+
+ 731          * @Description:       MINUS button function
+ 732          * @param:     
+ 733          * @return:            NA
+ 734          * @Author:      
+ 735          * @Date:      
+ 736          ***************************************************************************/
+ 737          void ButtonPressedMinusProcess(void)
+ 738          {
+ 739   1        UCHAR ucDeviceMotorMode = 0;
+ 740   1      //  STATIC UCHAR sucPWMDutyPrint[4]={0};
+ 741   1        
+ 742   1        //ucPATPWMDutyCycle = PATMotorDutyCycleRegisterValueGet();
+ 743   1        //ucVIBPWMDutyCycle = VIBMotorDutyCycleRegisterValueGet();
+ 744   1        ucDeviceMotorMode = DeviceApp_GetMotorMode();
+ 745   1      
+ 746   1        if (DEVICE_APP_MODUS_ONE == DeviceApp_GetModus())
+ 747   1        {
+ 748   2          if (ucVIBPWMDutyCycle > PWM_DUTY_CYCLE_VIB_DEFAULT_MIN)
+ 749   2          {
+ 750   3            ucVIBPWMDutyCycle = ucVIBPWMDutyCycle - PWM_DUTY_CYCLE_VIB_STEP;
+ 751   3          }
+ 752   2          else
+ 753   2          {
+ 754   3            ucVIBPWMDutyCycle = PWM_DUTY_CYCLE_VIB_DEFAULT_MIN;
+ 755   3          }
+ 756   2        }
+ 757   1        else if( DEVICE_APP_MODUS_TWO == DeviceApp_GetModus())
+ 758   1        {
+ 759   2           if(ucVIBPWMDutyCycle > g_astPWMDutyMap[ucDeviceMotorMode].usPWMDutyMin)
+ 760   2           {
+ 761   3            ucVIBPWMDutyCycle = ucVIBPWMDutyCycle - PWM_DUTY_CYCLE_VIB_MODUES_TWO_STEP;
+ 762   3           }
+ 763   2           else
+ 764   2           {
+ 765   3            ucVIBPWMDutyCycle=g_astPWMDutyMap[ucDeviceMotorMode].usPWMDutyMin;
+ 766   3           }
+ 767   2        }
+ 768   1        
+ 769   1        if(ucPATPWMDutyCycle > PWM_DUTY_CYCLE_PAT_MIN)
+ 770   1        {
+ 771   2          ucMotorExerciseLevel--;
+ 772   2          //ucPATPWMDutyCycle = ucPATPWMDutyCycle - PWM_DUTY_CYCLE_PAT_STEP;
+ 773   2        }
+ 774   1        else
+ 775   1        {
+ 776   2          ucMotorExerciseLevel = EXERCISE_LEVEL_ONE;
+ 777   2          //ucPATPWMDutyCycle = PWM_DUTY_CYCLE_PAT_MIN;
+ 778   2        }
+ 779   1        ucPATPWMDutyCycle = g_astExerciseLevelMap[ucMotorExerciseLevel].ucPWMDuty;
+ 780   1      //  sucPWMDutyPrint[1] = ucVIBPWMDutyCycle;
+ 781   1      //  sucPWMDutyPrint[2] = ucPATPWMDutyCycle;
+ 782   1      //  sucPWMDutyPrint[3] = ucDeviceMotorMode;
+ 783   1      //  sucPWMDutyPrint[0] = 0xff;
+ 784   1      //  PWMUartSendString(sucPWMDutyPrint);
+ 785   1        return;
+ 786   1      }
+ 787          
+ 788          /**************************************************************************
+ 789          * @function name:     MotorThreePlusIndication
+ 790          * @Description:       Motor three plus
+ 791          * @param:     
+ 792          * @return:      NA
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 14  
+
+ 793          * @Author:      
+ 794          * @Date:      
+ 795          ***************************************************************************/
+ 796          void MotorThreePlusIndication(void)
+ 797          {
+ 798   1        if(TRUE == boMotorIndicated)
+ 799   1        {
+ 800   2          if(ucMotorIndicateNumber < MOTOR_INDICATE_NUMBER)
+ 801   2          {
+ 802   3            if(ucMotorIndicateCount == (MOTOR_WORK_DURATION*2))
+ 803   3            {
+ 804   4              ucMotorIndicateCount=0;
+ 805   4              ucMotorIndicateNumber++;
+ 806   4            }
+ 807   3            if(ucMotorIndicateCount == 0)
+ 808   3            {
+ 809   4              ucVIBPWMDutyCycle = PWM_DUTY_CYCLE_VIB_STRONG_LEVEL;    
+ 810   4            }
+ 811   3            else if(ucMotorIndicateCount >= MOTOR_WORK_DURATION)
+ 812   3            {
+ 813   4              ucVIBPWMDutyCycle = PWM_DUTY_CYCLE_LEVEL_ZERO;      
+ 814   4            }
+ 815   3            
+ 816   3            VIBMotorDutySet(ucVIBPWMDutyCycle);
+ 817   3            
+ 818   3            return;
+ 819   3          }
+ 820   2          else
+ 821   2          {
+ 822   3            boMotorIndicated = FALSE;
+ 823   3            ucMotorIndicateNumber =0;
+ 824   3            ucMotorIndicateCount=0;
+ 825   3            if (DEVICE_APP_MODUS_ONE == DeviceApp_GetModus())
+ 826   3            {
+ 827   4              ucVIBPWMDutyCycle = PWM_DUTY_CYCLE_VIB_DEFAULT_MIN;
+ 828   4            }
+ 829   3            else if( DEVICE_APP_MODUS_TWO == DeviceApp_GetModus())
+ 830   3            {
+ 831   4              ucVIBPWMDutyCycle = PWM_DUTY_CYCLE_VIB_CASE_ONE_MIN;
+ 832   4            }
+ 833   3            
+ 834   3            ucMotorExerciseLevel = EXERCISE_LEVEL_ONE;
+ 835   3            ucPATPWMDutyCycle = PWM_DUTY_CYCLE_PAT_MIN;
+ 836   3          }
+ 837   2        }
+ 838   1        return;
+ 839   1      }
+ 840          /**************************************************************************
+ 841          * @function name:     ButtonPressedLongMinusProcess
+ 842          * @Description:       Minus Long pressed function
+ 843          * @param:     
+ 844          * @return:      NA
+ 845          * @Author:      
+ 846          * @Date:      
+ 847          ***************************************************************************/
+ 848          void ButtonPressedLongMinusProcess(void)
+ 849          {
+ 850   1        UCHAR ucDeviceMotorMode = 0;
+ 851   1        
+ 852   1        ucDeviceMotorMode = DeviceApp_GetMotorMode();
+ 853   1        
+ 854   1        if( DEVICE_APP_MODUS_ONE == DeviceApp_GetModus())
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 15  
+
+ 855   1        {   
+ 856   2          ucVIBPWMDutyCycle = PWM_DUTY_CYCLE_VIB_DEFAULT_MIN;
+ 857   2        }
+ 858   1        else if(DEVICE_APP_MODUS_TWO == DeviceApp_GetModus())
+ 859   1        {
+ 860   2          ucVIBPWMDutyCycle = g_astPWMDutyMap[ucDeviceMotorMode].usPWMDutyMin;    
+ 861   2        }
+ 862   1        ucMotorExerciseLevel = EXERCISE_LEVEL_ONE;
+ 863   1        ucPATPWMDutyCycle = PWM_DUTY_CYCLE_PAT_MIN;
+ 864   1        
+ 865   1        return;
+ 866   1      }
+ 867          /**************************************************************************
+ 868          * @function name:     IsPlusFunctionLedFlashValid
+ 869          * @Description:     When the PWM duty cycle meet the range, PLUS/MINUS button LED should not flash
+ 870          * @param:     
+ 871          * @return:      NA
+ 872          * @Author:      
+ 873          * @Date:      
+ 874          ***************************************************************************/
+ 875          BOOL IsPlusMinusFunctionLedFlashValid(BUTTON_PRESSED_E enButtonBoardsPressed)
+ 876          {
+ 877   1        UCHAR ucDeviceMotorMode = 0;
+ 878   1        
+ 879   1        ucDeviceMotorMode = DeviceApp_GetMotorMode();
+ 880   1      
+ 881   1        if( DEVICE_APP_MODUS_ONE == DeviceApp_GetModus())
+ 882   1        {
+ 883   2          if( enButtonBoardsPressed == BUTTON_PRESSED_PLUS)  // PLUS BUTTON
+ 884   2          {
+ 885   3            if( ucDeviceMotorMode == DEVICE_MOTOR_CASE_ONE)
+ 886   3            {
+ 887   4              if((ucVIBPWMDutyCycle < PWM_DUTY_CYCLE_VIB_DEFAULT_MAX)||
+ 888   4                 (ucPATPWMDutyCycle < PWM_DUTY_CYCLE_PAT_MAX))
+ 889   4              {
+ 890   5                return TRUE;
+ 891   5              }
+ 892   4            }
+ 893   3            else if( ucDeviceMotorMode == DEVICE_MOTOR_CASE_TWO)
+ 894   3            {
+ 895   4              if(ucPATPWMDutyCycle < PWM_DUTY_CYCLE_PAT_MAX)
+ 896   4              {
+ 897   5                return TRUE;
+ 898   5              }
+ 899   4            }
+ 900   3            else if( ucDeviceMotorMode == DEVICE_MOTOR_CASE_THREE)
+ 901   3            {
+ 902   4              if(ucVIBPWMDutyCycle < PWM_DUTY_CYCLE_VIB_DEFAULT_MAX)
+ 903   4              {
+ 904   5                return TRUE;
+ 905   5              }
+ 906   4            }
+ 907   3          }
+ 908   2          else if( enButtonBoardsPressed == BUTTON_PRESSED_MINUS)  // MINUS BUTTON
+ 909   2          {
+ 910   3            if( ucDeviceMotorMode == DEVICE_MOTOR_CASE_ONE)
+ 911   3            {
+ 912   4              if((ucVIBPWMDutyCycle > PWM_DUTY_CYCLE_VIB_DEFAULT_MIN)||
+ 913   4                 (ucPATPWMDutyCycle > PWM_DUTY_CYCLE_PAT_MIN))
+ 914   4              {
+ 915   5                return TRUE;
+ 916   5              }
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 16  
+
+ 917   4            }
+ 918   3            else if( ucDeviceMotorMode == DEVICE_MOTOR_CASE_TWO)
+ 919   3            {
+ 920   4              if(ucPATPWMDutyCycle > PWM_DUTY_CYCLE_PAT_MIN)
+ 921   4              {
+ 922   5                return TRUE;
+ 923   5              }
+ 924   4            }
+ 925   3            else if( ucDeviceMotorMode == DEVICE_MOTOR_CASE_THREE)
+ 926   3            {
+ 927   4              if(ucVIBPWMDutyCycle > PWM_DUTY_CYCLE_VIB_DEFAULT_MIN)
+ 928   4              {
+ 929   5                return TRUE;
+ 930   5              }
+ 931   4            }
+ 932   3          }
+ 933   2        }
+ 934   1        else if( DEVICE_APP_MODUS_TWO == DeviceApp_GetModus())
+ 935   1        {
+ 936   2          if( enButtonBoardsPressed == BUTTON_PRESSED_PLUS)
+ 937   2          {
+ 938   3            if((ucVIBPWMDutyCycle < g_astPWMDutyMap[ucDeviceMotorMode].usPWMDutyMax)||
+ 939   3                 (ucPATPWMDutyCycle < PWM_DUTY_CYCLE_PAT_MAX))
+ 940   3            {
+ 941   4              return TRUE;
+ 942   4            }
+ 943   3          }
+ 944   2          else if( enButtonBoardsPressed == BUTTON_PRESSED_MINUS)
+ 945   2          {
+ 946   3            if((ucVIBPWMDutyCycle > g_astPWMDutyMap[ucDeviceMotorMode].usPWMDutyMin)||
+ 947   3                (ucPATPWMDutyCycle > PWM_DUTY_CYCLE_PAT_MIN))
+ 948   3            {
+ 949   4              return TRUE;
+ 950   4            }
+ 951   3          }
+ 952   2        }
+ 953   1        
+ 954   1        return FALSE;
+ 955   1      }
+ 956          /**************************************************************************
+ 957          * @function name:     VIBMotorLevelBackToLowWithCaseChange
+ 958          * @Description:     When motor case chage, all motor speed down to low
+ 959          * @param:     
+ 960          * @return:      NA
+ 961          * @Author:      
+ 962          * @Date:      
+ 963          ***************************************************************************/
+ 964          void VIBMotorLevelBackToLowWithCaseChange(void)
+ 965          {
+ 966   1        UCHAR ucDeviceMotorMode = 0;
+ 967   1        
+ 968   1        ucDeviceMotorMode = DeviceApp_GetMotorMode();
+ 969   1        if (DEVICE_APP_MODUS_ONE == DeviceApp_GetModus())
+ 970   1        {
+ 971   2          ucVIBPWMDutyCycle = PWM_DUTY_CYCLE_VIB_DEFAULT_MIN;
+ 972   2        }
+ 973   1        else
+ 974   1        {
+ 975   2          ucVIBPWMDutyCycle = g_astPWMDutyMap[ucDeviceMotorMode].usPWMDutyMin;
+ 976   2        } 
+ 977   1        
+ 978   1        ucMotorExerciseLevel = EXERCISE_LEVEL_ONE;
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 17  
+
+ 979   1        ucPATPWMDutyCycle = PWM_DUTY_CYCLE_PAT_MIN;
+ 980   1      }
+ 981          /**************************************************************************
+ 982          * @function name:     IsMotorIndicateProcess
+ 983          * @Description:       Motor three plus flag to stop other motor process
+ 984          * @param:     
+ 985          * @return:      NA
+ 986          * @Author:      
+ 987          * @Date:      
+ 988          ***************************************************************************/
+ 989          BOOL IsMotorIndicateProcess(void)
+ 990          {
+ 991   1        return boMotorIndicated;
+ 992   1      }
+ 993          
+ 994          /**************************************************************************
+ 995          * @function name:     MotorSmoothUpdateEnable
+ 996          * @Description:      Enable PWM  update the setting value in 250ms 
+ 997          * @param:     
+ 998          * @return:      NA
+ 999          * @Author:      
+1000          * @Date:      
+1001          ***************************************************************************/
+1002          void MotorSmoothUpdateEnable(void)
+1003          {
+1004   1        if(TRUE == IsTouchState())
+1005   1        {
+1006   2          ucMotorChangePeriodCount++;
+1007   2          if(ucMotorChangePeriodCount > 2)
+1008   2          {
+1009   3            boEnableMotorSmoothUpdate = TRUE;
+1010   3          }
+1011   2        }
+1012   1        else
+1013   1        {
+1014   2          ucMotorChangePeriodCount=0;
+1015   2          boEnableMotorSmoothUpdate = FALSE;
+1016   2        }
+1017   1        
+1018   1      return;
+1019   1      }
+1020          /**************************************************************************
+1021          * @function name:     MotorSmoothUpdate
+1022          * @Description:     PWM will update the setting value in 250ms 
+1023          * @param:     
+1024          * @return:      NA
+1025          * @Author:      
+1026          * @Date:      
+1027          ***************************************************************************/
+1028          void MotorSmoothUpdate(void)
+1029          {
+1030   1        //UCHAR ucVIBRegisterDutyCycle=0;
+1031   1        
+1032   1        //ucVIBRegisterDutyCycle = VIBMotorDutyCycleRegisterValueGet();
+1033   1        
+1034   1        if(FALSE == TOUCH_EN)
+1035   1        {
+1036   2          //PWMUartSendString("0");
+1037   2          ucVIBCurrentDutyCycle = ucVIBPWMDutyCycle;
+1038   2          ucPATCurrentDutyCycle = ucPATPWMDutyCycle;
+1039   2          
+1040   2          return;   
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 18  
+
+1041   2        }
+1042   1        
+1043   1        if(ucVIBCurrentDutyCycle == ucVIBPWMDutyCycle)
+1044   1        {
+1045   2          ucVIBMotorStep = 0;
+1046   2          ucVIBCurrentDutyCycle = ucVIBPWMDutyCycle;
+1047   2      
+1048   2          ucPATMotorStep = 0;
+1049   2          //PWMUartSendString("1");
+1050   2          
+1051   2        }
+1052   1          
+1053   1        if(TRUE == boEnableMotorSmoothUpdate)
+1054   1        {
+1055   2          boEnableMotorSmoothUpdate = FALSE; // 5MS check once
+1056   2          ucMotorChangePeriodCount = 0;
+1057   2      
+1058   2          if(ucVIBMotorStep == 0)
+1059   2          {
+1060   3            ucVIBMotorStep = ((ucVIBPWMDutyCycle - ucVIBCurrentDutyCycle)/25)+1; //250ms update completed
+1061   3            
+1062   3            //PWMUartSendString("5");
+1063   3          }
+1064   2      
+1065   2          if (ucPATMotorStep == 0)
+1066   2          {
+1067   3            ucPATMotorStep = ((ucPATPWMDutyCycle - ucPATCurrentDutyCycle) / 25) + 1; //250ms update completed
+1068   3      
+1069   3            //PWMUartSendString("5");
+1070   3          }
+1071   2      
+1072   2          if (ucVIBCurrentDutyCycle >= ucVIBPWMDutyCycle)
+1073   2          {
+1074   3            ucVIBCurrentDutyCycle = ucVIBPWMDutyCycle;
+1075   3          }
+1076   2          else
+1077   2          {
+1078   3            ucVIBCurrentDutyCycle = ucVIBCurrentDutyCycle + ucVIBMotorStep;
+1079   3          }
+1080   2      
+1081   2          if (ucPATCurrentDutyCycle >= ucPATPWMDutyCycle)
+1082   2          {
+1083   3            ucPATCurrentDutyCycle = ucPATPWMDutyCycle;
+1084   3          }
+1085   2          else
+1086   2          {
+1087   3            ucPATCurrentDutyCycle = ucPATCurrentDutyCycle + ucPATMotorStep;
+1088   3          }
+1089   2      
+1090   2          //PWMUartSendString("2");
+1091   2          return ;
+1092   2        }
+1093   1        
+1094   1        //PWMUartSendString("3");
+1095   1        return ;
+1096   1      }
+1097          /**************************************************************************
+1098          * @function name:     PATMotorDutyGet
+1099          * @Description:       get current PAT motor Duty cycle
+1100          * @param:
+1101          * @return:      NA
+1102          * @Author:
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 19  
+
+1103          * @Date:
+1104          ***************************************************************************/
+1105          UCHAR PATMotorDutyGet(void)
+1106          {
+1107   1        return ucPATCurrentDutyCycle;
+1108   1      }
+1109          /**************************************************************************
+1110          * @function name:     VIBMotorDutyGet
+1111          * @Description:       get current VIB motor Duty cycle
+1112          * @param:
+1113          * @return:      NA
+1114          * @Author:
+1115          * @Date:
+1116          ***************************************************************************/
+1117          UCHAR VIBMotorDutyGet(void)
+1118          {
+1119   1        return ucVIBCurrentDutyCycle;
+1120   1      }
+1121          
+1122          /**************************************************************************
+1123          * @function name:     MotorStop
+1124          * @Description:       Stop motor and make current value to level 1
+1125          * @param:     
+1126          * @return:      NA
+1127          * @Author:      
+1128          * @Date:      
+1129          ***************************************************************************/
+1130          void MotorStop(void)
+1131          {
+1132   1        ucVIBPWMDutyCycle = PWM_DUTY_CYCLE_VIB_DEFAULT_MIN;
+1133   1      
+1134   1        ucMotorExerciseLevel = EXERCISE_LEVEL_ONE;
+1135   1        ucPATPWMDutyCycle = PWM_DUTY_CYCLE_PAT_MIN;
+1136   1        
+1137   1        PATMotorDutySet(PWM_DUTY_CYCLE_LEVEL_ZERO);
+1138   1        VIBMotorDutySet(PWM_DUTY_CYCLE_LEVEL_ZERO);
+1139   1        return;
+1140   1      }
+1141          /**************************************************************************
+1142          * @function name:     MotorSmoothStepClear
+1143          * @Description:     
+1144          * @param:     
+1145          * @return:      NA
+1146          * @Author:      
+1147          * @Date:      
+1148          ***************************************************************************/
+1149          void MotorSmoothStepClear(void)
+1150          {
+1151   1        ucVIBMotorStep = 0;
+1152   1        ucPATMotorStep = 0;
+1153   1        ucVIBCurrentDutyCycle = 0;
+1154   1        ucPATCurrentDutyCycle = 0;
+1155   1        return;
+1156   1      }
+1157          /**************************************************************************
+1158          * @function name:     ButtonTriggerParamClear
+1159          * @Description:     
+1160          * @param:     
+1161          * @return:      NA
+1162          * @Author:      
+1163          * @Date:      
+1164          ***************************************************************************/
+C51 COMPILER V9.54   HAL_BUTTON                                                            03/10/2021 14:40:16 PAGE 20  
+
+1165          void ButtonTriggerParamClear(void)
+1166          {
+1167   1        usPowerButtonDuration = 0;
+1168   1        boPowerButtonISRTrigged = FALSE;
+1169   1        boStopRegisterClear = FALSE;
+1170   1        boIsPowerButtonValidPressed = FALSE;
+1171   1        boPowerButtonReleased = FALSE;
+1172   1        return;
+1173   1      }
+1174          /**************************************************************************
+1175          * @function name:     DeviceOff
+1176          * @Description:       Device off and enter into low power
+1177          * @param:     
+1178          * @return:      NA
+1179          * @Author:      
+1180          * @Date:      
+1181          ***************************************************************************/
+1182          void DeviceOff(void)
+1183          {
+1184   1        LEDOff();
+1185   1        WatchDogStop();
+1186   1        TouchFunctionDisable();
+1187   1        ADBatteryPowerSupplyDisable();
+1188   1        PWM_Stop();
+1189   1        ADC_Stop();
+1190   1        UART_Stop();
+1191   1        MotorStop();
+1192   1        DeviceAutoOffParamClear();
+1193   1        BatterySampleParamClear();
+1194   1        ButtonTriggerParamClear();
+1195   1        DeviceApp_SetAppState(DEVICE_APP_STATE_SLEEP);
+1196   1        DeviceApp_SetMotorMode();
+1197   1        ButtonUartSendString(" Device OFF\r\n");
+1198   1        PCON |= 0X02;     // Stop Mode
+1199   1        _nop_();    
+1200   1        _nop_();
+1201   1        _nop_();
+1202   1        _nop_();
+1203   1      
+1204   1        return;
+1205   1      }
+1206          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1864    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =     77       8
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

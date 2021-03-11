@@ -1,0 +1,116 @@
+C51 COMPILER V9.54   DRV_IAP                                                               03/10/2021 14:26:13 PAGE 1   
+
+
+C51 COMPILER V9.54, COMPILATION OF MODULE DRV_IAP
+OBJECT MODULE PLACED IN DRV_IAP.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE c\DRV_IAP.c COMPACT OMF2 OPTIMIZE(8,SIZE) BROWSE DEFINE(XUART_LOG,XMOTOR
+                    -_PARAM_TEST,TIME2_ENABLE,XDC_INTERRUPT,VIB_TIME_ENABLE,FOUR_BUTTON,xLOWPOWER_DISABLEMOTOR) DEBUG PRINT(.\DRV_IAP.lst) TA
+                    -BS(2) OBJECT(DRV_IAP.obj)
+
+line level    source
+
+   1          #include "H/Function_Init.H"
+   2          #include "H/DRV_IAP.h"
+   3          
+   4          
+   5          UCHAR code *IapAddr = 0x00;
+   6          
+   7          BOOL boTestFlag = FALSE;
+   8          UCHAR ucIAPReadValuePrint[1] = { 0 };
+   9          /*****************************************************
+  10          * @function name:   IAP_Test
+  11          * @Description:   Only enable UART print 2 times    
+  12          * @param:     NA
+  13          * @return:      NA  
+  14          * @Author:      
+  15          * @Date: 
+  16          *****************************************************/
+  17          void IAP_Test(void)
+  18          {
+  19   1      
+  20   1        UCHAR ucIapReadData = 0x00;   //Store read IAP data
+  21   1      
+  22   1        if ((DEVICE_APP_STATE_RUN == DeviceApp_GetSystemState()) &&  (boTestFlag == FALSE))
+  23   1        {
+  24   2          ucIapReadData = IAPRead(0x7f, IapEPPROM);
+  25   2          //  IAPADE = 0x00;       //MOVC to ROM
+  26   2          ucIAPReadValuePrint[0]= ucIapReadData;
+  27   2          if (ucIapReadData <= 2)
+  28   2          {
+  29   3            Uart0_Init();   
+  30   3            ucIapReadData++;
+  31   3            IAPWrite(0x7f, ucIapReadData, IapEPPROM);
+  32   3            //  IAPADE = 0x00;       //MOVC to ROM
+  33   3            boTestFlag = TRUE;
+  34   3            TimerUartSendString(ucIAPReadValuePrint);
+  35   3          }
+  36   2        }
+  37   1      
+  38   1      }
+  39          /*****************************************************
+  40          * @function name:     IAPWrite
+  41          * @Description:       
+  42          * @param:     UINT Addr,UCHAR Value,UCHAR IAPArea
+  43          * @return:            NA  
+  44          * @Author:      
+  45          * @Date: 
+  46          *****************************************************/
+  47          void IAPWrite(UINT Addr,UCHAR Value,UCHAR IAPArea)
+  48          { 
+  49   1        EA = 0;
+  50   1        IAPDAT = Value;      //Write Data
+  51   1        IAPADH = ((Addr>>8)&0X7F);   //Write address 5 bits high
+  52   1        IAPADL = Addr;               //Write address 8 bits low
+  53   1        
+C51 COMPILER V9.54   DRV_IAP                                                               03/10/2021 14:26:13 PAGE 2   
+
+  54   1        IAPADE = IAPArea;  //IAPArea=0x00£ºChoose ROM IAPArea=0x02: Choose EEPROM
+  55   1        IAPKEY = 240;      //IAP open protection control time
+  56   1        IAPCTL = 0x06;     //CPU hold time 2ms
+  57   1        _nop_();
+  58   1        _nop_();
+  59   1        _nop_();
+  60   1        _nop_();
+  61   1        _nop_();
+  62   1        _nop_();
+  63   1        _nop_();
+  64   1        _nop_();
+  65   1        IAPADE = 0x00;      //MOVC to ROM
+  66   1        EA = 1;
+  67   1      }
+  68          /*****************************************************
+  69          * @function name:     IAPRead
+  70          * @Description:       
+  71          * @param:     UINT Addr,UCHAR IAPArea
+  72          * @return:            ReadValue 
+  73          * @Author:      
+  74          * @Date:  
+  75          *****************************************************/
+  76          UCHAR IAPRead(UINT Addr,UCHAR IAPArea)
+  77          {
+  78   1        UCHAR ucReadValue = 0x00;
+  79   1        EA = 0;
+  80   1        IAPADE = IAPArea;
+  81   1        ucReadValue = *(IapAddr+Addr); //Read Data
+  82   1        IAPADE = 0x00;               //MOVC to ROM
+  83   1        EA = 1;
+  84   1        return ucReadValue;
+  85   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    147    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =      4       3
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
